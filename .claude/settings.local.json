@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Select-Object -First 30)",
+      "PowerShell(Get-ChildItem \"e:\\\\Projets_CREC\\\\projet-dashboard-endure-net-project\\\\dashboard-endure-net-project\" | ForEach-Object { $_.Name })"
+    ]
+  }
+}
