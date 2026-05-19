@@ -10,4 +10,4 @@ Route::get('/queries', [QueriesController::class, 'index'])->name('queries');
 Route::post('/queries/refresh', [QueriesController::class, 'refresh'])->name('queries.refresh');
 Route::get('/queries/pdf', [QueriesController::class, 'exportPdf'])->name('queries.pdf');
 Route::get('/rapport/pdf', [DashboardController::class, 'exportRapportPdf'])->name('rapport.pdf');
-Route::get('/performance/pdf', [DashboardController::class, 'exportPerformancePdf'])->name('performance.pdf');
+Route::post('/performance/pdf', [DashboardController::class, 'exportPerformancePdf'])->name('performance.pdf');

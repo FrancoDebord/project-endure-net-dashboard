@@ -31,7 +31,7 @@ h2 {
 }
 
 /* Table constrained — does not fill the full page width */
-.tbl-wrap { width: 62%; }
+.tbl-wrap { width: 62%; margin: 0 auto; }
 
 table {
     width: 100%;
@@ -138,22 +138,26 @@ table tbody tr:nth-child(even) td { background: #F8FAFC; }
 </table>
 </div>
 
-{{-- ── SVG line chart ── --}}
-<h2>Courbes de performance journalière (— réelle &nbsp;· · · moyenne)</h2>
+{{-- ── Chart: canvas capture (preferred) or SVG fallback ── --}}
+<h2>Enrôlements journaliers par binôme (— réelle &nbsp;· · · moyenne)</h2>
+
+@if (!empty($chartImage))
+<img src="{{ $chartImage }}" style="width:100%;max-height:310px;object-fit:contain;display:block;margin-bottom:12px;">
+@else
 
 @php
 $nDates = count($allDates);
 
 $svgW  = 940;
-$svgH  = 295;
+$svgH  = 310;
 $padL  = 42;
 $padR  = 148;   // legend panel
 $padT  = 20;
-$padB  = 50;
+$padB  = 52;
 $plotW = $svgW - $padL - $padR;
 $plotH = $svgH - $padT - $padB;
 
-// Y max
+// Y max (from daily data)
 $maxY = 0;
 foreach ($tabletData as $t) {
     foreach ($t['daily'] as $v) { if ($v > $maxY) $maxY = $v; }
@@ -167,7 +171,7 @@ $yFor = function(float $v) use ($padT, $plotH, $yMax): float {
     return round($padT + $plotH - ($v / $yMax) * $plotH, 1);
 };
 
-// X label thinning
+// X label thinning to avoid overlap
 $lEvery = 1;
 if ($nDates > 15) $lEvery = 2;
 if ($nDates > 30) $lEvery = 3;
@@ -196,15 +200,15 @@ $legX   = $padL + $plotW + 14;
               text-anchor="end" font-size="8.5" fill="#94A3B8">{{ round($yVal) }}</text>
     @endfor
 
-    {{-- X-axis tick marks + labels --}}
+    {{-- X-axis tick marks + date labels (thinned) --}}
     @foreach ($allDates as $di => $date)
         @if ($di % $lEvery === 0 || $di === $nDates - 1)
             @php $xSvg = $xFor($di); $lbl = \Carbon\Carbon::parse($date)->format('d/m'); @endphp
             <line x1="{{ $xSvg }}" y1="{{ $padT + $plotH }}"
-                  x2="{{ $xSvg }}" y2="{{ $padT + $plotH + 5 }}"
+                  x2="{{ $xSvg }}" y2="{{ $padT + $plotH + 4 }}"
                   stroke="#94A3B8" stroke-width="0.7"/>
-            <text x="{{ $xSvg }}" y="{{ $padT + $plotH + 15 }}"
-                  text-anchor="middle" font-size="8" fill="#64748B">{{ $lbl }}</text>
+            <text x="{{ $xSvg }}" y="{{ $padT + $plotH + 14 }}"
+                  text-anchor="middle" font-size="7.5" fill="#64748B">{{ $lbl }}</text>
         @endif
     @endforeach
 
@@ -228,7 +232,7 @@ $legX   = $padL + $plotW + 14;
             $avg   = (float)$t['avg'];
             $yAvg  = $yFor($avg);
 
-            // Daily polyline points
+            // Build polyline points from daily data
             $points = '';
             foreach ($allDates as $di => $date) {
                 $v = $t['daily'][$date] ?? 0;
@@ -237,27 +241,26 @@ $legX   = $padL + $plotW + 14;
             $points = trim($points);
         @endphp
 
-        {{-- Daily performance line --}}
+        {{-- Daily performance polyline --}}
         <polyline points="{{ $points }}"
-                  fill="none" stroke="{{ $color }}" stroke-width="1.6"
+                  fill="none" stroke="{{ $color }}" stroke-width="1.8"
                   stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>
 
-        {{-- Data points --}}
+        {{-- Data point dots --}}
         @foreach ($allDates as $di => $date)
             @php $v = $t['daily'][$date] ?? 0; @endphp
             @if ($v > 0)
                 <circle cx="{{ $xFor($di) }}" cy="{{ $yFor($v) }}"
-                        r="2.3" fill="{{ $color }}" stroke="#fff" stroke-width="0.7"/>
+                        r="2.2" fill="{{ $color }}" stroke="#fff" stroke-width="0.7"/>
             @endif
         @endforeach
 
-        {{-- Average horizontal dashed line --}}
+        {{-- Average dashed horizontal line --}}
         @if ($avg > 0)
             <line x1="{{ $padL + 1 }}" y1="{{ $yAvg }}"
                   x2="{{ $padL + $plotW - 1 }}" y2="{{ $yAvg }}"
                   stroke="{{ $color }}" stroke-width="1.2"
-                  stroke-dasharray="5,3" opacity="0.7"/>
-            {{-- Average label at right end of the line --}}
+                  stroke-dasharray="5,3" opacity="0.65"/>
             <text x="{{ $padL + $plotW + 3 }}" y="{{ $yAvg + 3.5 }}"
                   font-size="7.5" fill="{{ $color }}" opacity="0.85">{{ $avg }}</text>
         @endif
@@ -268,14 +271,14 @@ $legX   = $padL + $plotW + 14;
           font-size="9" font-weight="bold" fill="#374151">Binôme · Moy/j actif</text>
 
     @foreach ($tabletData as $li => $t)
-        @php $ly = $padT + 15 + $li * 20; @endphp
+        @php $ly = $padT + 15 + $li * 22; @endphp
 
         {{-- Solid line sample --}}
         <line x1="{{ $legX }}" y1="{{ $ly + 5 }}"
               x2="{{ $legX + 14 }}" y2="{{ $ly + 5 }}"
               stroke="{{ $t['color'] }}" stroke-width="2"/>
         <circle cx="{{ $legX + 7 }}" cy="{{ $ly + 5 }}"
-                r="2.5" fill="{{ $t['color'] }}" stroke="#fff" stroke-width="0.5"/>
+                r="2.2" fill="{{ $t['color'] }}" stroke="#fff" stroke-width="0.5"/>
 
         {{-- Dashed line sample --}}
         <line x1="{{ $legX + 18 }}" y1="{{ $ly + 5 }}"
@@ -287,12 +290,14 @@ $legX   = $padL + $plotW + 14;
     @endforeach
 
     {{-- Legend note --}}
-    @php $noteY = $padT + 15 + count($tabletData) * 20 + 10; @endphp
+    @php $noteY = $padT + 15 + count($tabletData) * 22 + 10; @endphp
     <text x="{{ $legX }}" y="{{ $noteY }}" font-size="8" fill="#94A3B8">— réelle</text>
-    <text x="{{ $legX + 35 }}" y="{{ $noteY }}" font-size="8" fill="#94A3B8">· · · moyenne</text>
+    <text x="{{ $legX + 38 }}" y="{{ $noteY }}" font-size="8" fill="#94A3B8">· · · moyenne</text>
 
 </svg>
-@endif
+@endif {{-- end @else (SVG fallback) --}}
+
+@endif {{-- end @if (!empty($tabletData)) --}}
 
 </body>
 </html>

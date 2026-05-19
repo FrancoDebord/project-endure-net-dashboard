@@ -455,6 +455,13 @@
                             <option>Grappe 2</option>
                             <option>Grappe 3</option>
                         </select>
+                        <select id="filterHHDag" onchange="filterHH()"
+                                class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
+                            <option value="">Tous les DAGs</option>
+                            @foreach ($householdDetails->pluck('dag')->filter()->unique()->sort() as $dagOpt)
+                                <option value="{{ $dagOpt }}">{{ $dagOpt }}</option>
+                            @endforeach
+                        </select>
                         <span id="hhCount" class="flex items-center text-xs text-gray-400 whitespace-nowrap px-2">
                             {{ $householdDetails->count() }} lignes
                         </span>
@@ -481,7 +488,7 @@
                             </thead>
                             <tbody class="divide-y divide-gray-50">
                                 @forelse ($householdDetails as $hh)
-                                    <tr class="hov-row transition-colors" data-bras="{{ $hh['bras'] }}" data-village="{{ $hh['village'] }}" data-cohort="{{ $hh['cohort'] }}" data-cluster="{{ $hh['cluster'] }}">
+                                    <tr class="hov-row transition-colors" data-bras="{{ $hh['bras'] }}" data-village="{{ $hh['village'] }}" data-cohort="{{ $hh['cohort'] }}" data-cluster="{{ $hh['cluster'] }}" data-dag="{{ $hh['dag'] }}">
                                         <td class="py-2.5 px-3 font-mono text-xs">
                                             <span class="{{ $hh['id_valid'] ? 'text-gray-500' : 'text-red-500' }}">{{ $hh['id'] }}</span>
                                             @if (!$hh['id_valid'])
@@ -541,14 +548,16 @@
 
             {{-- Chart nets --}}
             <div class="card p-6">
-                <p class="section-title">Filets distribués par bras</p>
+                <p class="section-title">Filets distribués</p>
                 @if ($studyNetsDetail->count())
-                    <canvas id="chartNets" height="220"></canvas>
-                    <div class="mt-3 space-y-2">
+                    <canvas id="chartNets" height="180"></canvas>
+
+                    {{-- Par bras --}}
+                    <div class="mt-3 space-y-1.5">
                         @foreach ($netsByBras as $bras => $count)
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-medium text-gray-600">{{ $bras }}</span>
-                                <span class="text-lg font-black" style="color:var(--red)">{{ $count }}</span>
+                                <span class="text-base font-black" style="color:var(--red)">{{ $count }}</span>
                             </div>
                         @endforeach
                         <hr class="border-gray-100">
@@ -557,6 +566,19 @@
                             <span class="text-xl font-black text-gray-800">{{ $studyNetsDetail->count() }}</span>
                         </div>
                     </div>
+
+                    {{-- Par DAG --}}
+                    @if ($byDag->count())
+                        <p class="section-title mt-5 mb-2">Par DAG</p>
+                        <div class="space-y-1.5">
+                            @foreach ($byDag as $row)
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-medium text-gray-600">{{ $row['dag'] }}</span>
+                                    <span class="text-base font-black text-gray-700">{{ $row['count'] }}</span>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
                 @else
                     <p class="text-xs text-gray-400 text-center py-8 italic">Aucune moustiquaire enregistrée</p>
                 @endif
@@ -612,6 +634,13 @@
                                 <option>Cohorte A</option>
                                 <option>Cohorte B</option>
                             </select>
+                            <select id="filterNetsDag" onchange="filterNets()"
+                                    class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
+                                <option value="">Tous les DAGs</option>
+                                @foreach ($byDag as $row)
+                                    <option value="{{ $row['dag'] }}">{{ $row['dag'] }}</option>
+                                @endforeach
+                            </select>
                             <span id="netsCount" class="flex items-center text-xs text-gray-400 whitespace-nowrap px-2">
                                 {{ $studyNetsDetail->count() }} filets
                             </span>
@@ -627,11 +656,12 @@
                                         <th class="py-2.5 px-3 text-left">Cohorte</th>
                                         <th class="py-2.5 px-3 text-left">Village</th>
                                         <th class="py-2.5 px-3 text-left">Grappe</th>
+                                        <th class="py-2.5 px-3 text-left">DAG</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-50">
                                     @forelse ($studyNetsDetail as $i => $net)
-                                        <tr class="hov-row transition-colors" data-bras="{{ $net['bras'] }}" data-village="{{ $net['village'] }}" data-cohort="{{ $net['cohort'] }}" data-cluster="{{ $net['cluster'] }}">
+                                        <tr class="hov-row transition-colors" data-bras="{{ $net['bras'] }}" data-village="{{ $net['village'] }}" data-cohort="{{ $net['cohort'] }}" data-cluster="{{ $net['cluster'] }}" data-dag="{{ $net['dag'] }}">
                                             <td class="py-2.5 px-3 text-right text-xs text-gray-400">{{ $i+1 }}</td>
                                             <td class="py-2.5 px-3 font-mono font-bold" style="color:var(--red)">
                                                 {{ $net['net_code'] }}
@@ -654,9 +684,10 @@
                                             </td>
                                             <td class="py-2.5 px-3 text-gray-600">{{ $net['village'] }}</td>
                                             <td class="py-2.5 px-3 text-xs text-gray-500">{{ $net['cluster'] }}</td>
+                                            <td class="py-2.5 px-3 text-xs text-gray-500">{{ $net['dag'] ?: '—' }}</td>
                                         </tr>
                                     @empty
-                                        <tr><td colspan="7" class="py-8 text-center text-gray-400 italic">Aucune moustiquaire enregistrée</td></tr>
+                                        <tr><td colspan="8" class="py-8 text-center text-gray-400 italic">Aucune moustiquaire enregistrée</td></tr>
                                     @endforelse
                                 </tbody>
                             </table>
@@ -1129,13 +1160,21 @@
             </ul>
         </div>
 
-        {{-- ── Performance des binômes ── --}}
+        {{-- ── Performance des binômes — graphique interactif ── --}}
         <div class="card p-6">
-            <p class="section-title">Performance des binômes</p>
-            <p class="text-sm text-gray-500 mb-5">
-                Courbes de performance journalière et moyenne d'enrôlements par binôme.
-            </p>
-            <form method="GET" action="{{ route('performance.pdf') }}" target="_blank" class="space-y-5">
+            <p class="section-title">Performance des binômes — enrôlements journaliers</p>
+
+            @if (!empty($performanceChart['datasets']))
+                <canvas id="chartPerformance" height="90" class="mb-6"></canvas>
+            @else
+                <p class="text-xs text-gray-400 italic mb-4">Aucune donnée disponible.</p>
+            @endif
+
+            <hr class="border-gray-100 mb-5">
+            <p class="text-sm font-semibold text-gray-600 mb-3">Exporter en PDF</p>
+            <form method="POST" id="performancePdfForm" action="{{ route('performance.pdf') }}" target="_blank" class="space-y-5">
+                @csrf
+                <input type="hidden" name="chart_image" id="perfChartImage">
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
 
                     <div>
@@ -1171,7 +1210,7 @@
                 </div>
 
                 <div class="flex items-center gap-4 pt-1">
-                    <button type="submit"
+                    <button type="button" onclick="downloadPerformancePdf()"
                             style="background:#374151"
                             class="inline-flex items-center gap-2 text-white text-sm font-bold px-6 py-2.5 rounded-xl hover:opacity-90 active:scale-95 transition shadow">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1297,6 +1336,7 @@ function filterHH() {
     const coh     = document.getElementById('filterCohort').value;
     const village = document.getElementById('filterHHVillage').value;
     const grappe  = document.getElementById('filterHHGrappe').value;
+    const dag     = document.getElementById('filterHHDag').value;
     let count = 0;
     document.querySelectorAll('#hhTable tbody tr').forEach(row => {
         const d = row.dataset;
@@ -1304,7 +1344,8 @@ function filterHH() {
             && (!bras    || d.bras    === bras)
             && (!coh     || d.cohort  === coh)
             && (!village || d.village === village)
-            && (!grappe  || (d.cluster || '').includes(grappe));
+            && (!grappe  || (d.cluster || '').includes(grappe))
+            && (!dag     || d.dag     === dag);
         row._searchHidden = !show;
         if (show) count++;
     });
@@ -1319,6 +1360,7 @@ function filterNets() {
     const village = document.getElementById('filterNetsVillage').value;
     const grappe  = document.getElementById('filterNetsGrappe').value;
     const cohort  = document.getElementById('filterNetsCohort').value;
+    const dag     = document.getElementById('filterNetsDag').value;
     let count = 0;
     document.querySelectorAll('#netsTable tbody tr').forEach(row => {
         const d = row.dataset;
@@ -1326,7 +1368,8 @@ function filterNets() {
             && (!bras    || d.bras    === bras)
             && (!village || d.village === village)
             && (!grappe  || (d.cluster || '').includes(grappe))
-            && (!cohort  || d.cohort  === cohort);
+            && (!cohort  || d.cohort  === cohort)
+            && (!dag     || d.dag     === dag);
         row._searchHidden = !show;
         if (show) count++;
     });
@@ -1387,6 +1430,51 @@ new Chart(document.getElementById('chartTablets'), {
     }
 });
 @endif
+
+// ── Chart Performance (ménages enrôlés / jour / tablette) ──
+@if (!empty($performanceChart['datasets']))
+new Chart(document.getElementById('chartPerformance'), {
+    type: 'line',
+    data: {
+        labels: {!! json_encode($performanceChart['labels']) !!},
+        datasets: {!! json_encode($performanceChart['datasets']) !!},
+    },
+    options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+                callbacks: {
+                    title: (items) => 'Date : ' + items[0].label,
+                    label: (item) => ' ' + item.dataset.label + ' : ' + item.parsed.y + ' enrôlé(s)',
+                }
+            },
+        },
+        scales: {
+            x: {
+                ticks: { font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 30 },
+                grid: { color: '#F1F5F9' },
+            },
+            y: {
+                beginAtZero: true,
+                ticks: { font: { size: 10 }, stepSize: 1 },
+                grid: { color: '#F1F5F9' },
+                title: { display: true, text: 'Enrôlés / jour', font: { size: 10 } },
+            },
+        },
+    },
+});
+@endif
+
+// ── Performance PDF export (canvas capture) ──
+function downloadPerformancePdf() {
+    const canvas = document.getElementById('chartPerformance');
+    if (canvas) {
+        document.getElementById('perfChartImage').value = canvas.toDataURL('image/png');
+    }
+    document.getElementById('performancePdfForm').submit();
+}
 
 // ── Chart Nets ──
 @if ($netsByBras->count())

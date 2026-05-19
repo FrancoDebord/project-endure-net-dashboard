@@ -165,15 +165,18 @@ class DashboardController extends Controller
             ->filter(fn($r) => ($r['a_tablette_id'] ?? '') !== '')
             ->pluck('a_tablette_id')->unique()->sort()->values();
 
+        $performanceChart = $this->buildPerformanceChartData($visiteRaw, $idRaw, $qbRaw);
+
         return view('dashboard', [
-            'events'        => self::EVENTS,
-            'baseline'      => $baseline,
-            'ua'            => $ua,
-            'ua24'          => $ua24,
-            'ae'            => $ae,
-            'followUp'      => $followUp,
-            'projectInfo'   => $this->redcap->getProjectInfo(),
-            'reportTablets' => $reportTablets,
+            'events'          => self::EVENTS,
+            'baseline'        => $baseline,
+            'ua'              => $ua,
+            'ua24'            => $ua24,
+            'ae'              => $ae,
+            'followUp'        => $followUp,
+            'projectInfo'     => $this->redcap->getProjectInfo(),
+            'reportTablets'   => $reportTablets,
+            'performanceChart'=> $performanceChart,
         ]);
     }
 
@@ -240,9 +243,13 @@ class DashboardController extends Controller
             ];
         }
 
-        $periodVisited  = array_sum(array_column($daily, 'visited'));
-        $periodEnrolled = array_sum(array_column($daily, 'enrolled'));
-        $periodNets     = array_sum(array_column($daily, 'nets'));
+        // Unique HH IDs across the whole period (avoids double-counting households
+        // that have visit records on multiple days)
+        $allPeriodHhIds      = $visits->pluck('household_id')->unique();
+        $allPeriodEnrolledIds = $allPeriodHhIds->filter(fn($id) => $consented($id));
+        $periodVisited  = $allPeriodHhIds->count();
+        $periodEnrolled = $allPeriodEnrolledIds->count();
+        $periodNets     = $allPeriodEnrolledIds->sum(fn($id) => $allNetsByHh->get($id, 0));
 
         // ── Section 2: Cumulative summary (all data, no date/tablet filter) ──
         $allEnrolled = collect($idRaw)
@@ -368,9 +375,11 @@ class DashboardController extends Controller
             ? round($grandTotal / count($allDates) / count($tabletData), 1)
             : 0;
 
+        $chartImage = $request->input('chart_image', '');
+
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('performance-pdf', compact(
             'tabletData', 'allDates', 'grandTotal', 'grandAvg',
-            'dateFrom', 'dateTo', 'tablets'
+            'dateFrom', 'dateTo', 'tablets', 'chartImage'
         ));
         $pdf->setPaper('A4', 'landscape');
 
@@ -380,6 +389,55 @@ class DashboardController extends Controller
     // ══════════════════════════════════════════════════════════════════════════
     // HELPERS
     // ══════════════════════════════════════════════════════════════════════════
+
+    private function buildPerformanceChartData(array $visiteRaw, array $idRaw, array $qbRaw): array
+    {
+        $idMap = collect($idRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->keyBy('household_id');
+
+        $qbConsentMap = collect($qbRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+            ->pluck('consent_accepted', 'household_id');
+
+        $consented = fn(string $id): bool =>
+            (($idMap->get($id, [])['consent_accepted'] ?? '') ?: ($qbConsentMap->get($id, ''))) === '1';
+
+        $visits = collect($visiteRaw)->filter(fn($r) => $r['household_id'] !== '');
+
+        $allDates = $visits->pluck('a_date_visite_id')->filter()->unique()->sort()->values()->toArray();
+
+        $datasets = [];
+        $ti = 0;
+        foreach ($visits->groupBy('a_tablette_id')->sortKeys() as $tablet => $byTablet) {
+            if ($tablet === '') continue;
+            $daily = [];
+            foreach ($allDates as $date) {
+                $hhIds = $byTablet->where('a_date_visite_id', $date)->pluck('household_id')->unique();
+                $daily[] = $hhIds->filter(fn($id) => $consented($id))->count();
+            }
+            $color = self::TABLET_COLORS[$ti % count(self::TABLET_COLORS)];
+            $datasets[] = [
+                'label'           => 'Tablette ' . $tablet,
+                'data'            => $daily,
+                'borderColor'     => $color,
+                'backgroundColor' => $color . '22',
+                'pointRadius'     => count($allDates) > 60 ? 1 : 3,
+                'pointHoverRadius'=> 5,
+                'tension'         => 0.3,
+                'borderWidth'     => 2,
+                'fill'            => false,
+            ];
+            $ti++;
+        }
+
+        $labels = array_map(
+            fn($d) => \Carbon\Carbon::parse($d)->format('d/m'),
+            $allDates
+        );
+
+        return compact('labels', 'datasets');
+    }
 
     private function buildVisits(array $visiteRaw, array $idRaw, array $qbRaw): Collection
     {
@@ -521,7 +579,9 @@ class DashboardController extends Controller
             )
             ->groupBy('household_id')->map->count();
 
-        $consentedHhIds = $visits->where('consent_accepted', '1')->pluck('household_id')->flip();
+        // Use allHouseholds (dual-source consent, no visit_status requirement) so nets
+        // belonging to consented households without a recorded visit_status are included.
+        $consentedHhIds = $allHouseholds->where('consent_accepted', '1')->pluck('household_id')->flip();
 
         $studyNetsFiltered = collect($studyNetRaw)
             ->filter(fn($r) =>
@@ -550,8 +610,14 @@ class DashboardController extends Controller
                 'cohort'       => self::COHORT_LABELS[$hh['study_cohort'] ?? ''] ?? '—',
                 'village'      => self::VILLAGE_LABELS[$hh['village'] ?? ''] ?? '—',
                 'cluster'      => self::CLUSTER_LABELS[self::extractCluster($hh)] ?? '—',
+                'dag'          => $hh['redcap_data_access_group'] ?? ($r['redcap_data_access_group'] ?? ''),
             ];
         })->values();
+
+        $byDag = $studyNetsDetail
+            ->groupBy('dag')
+            ->map(fn($g, $d) => ['dag' => $d ?: 'Non défini', 'count' => $g->count()])
+            ->sortKeys()->values();
 
         $householdDetails = $allHouseholds->map(function ($hh) use ($qb, $membersByHh, $oldNetsByHh, $studyNetsByHh, $visitDataByHh) {
             $id         = $hh['household_id'];
@@ -569,6 +635,7 @@ class DashboardController extends Controller
                 'bras'         => self::BRAS_LABELS[$hh['bras'] ?? ''] ?? '—',
                 'cohort'       => self::COHORT_LABELS[$hh['study_cohort'] ?? ''] ?? '—',
                 'cluster'      => self::CLUSTER_LABELS[$cluster] ?? ($cluster ?: '—'),
+                'dag'          => $hh['redcap_data_access_group'] ?? '',
                 'consented'    => ($hh['consent_accepted'] ?? '') === '1',
                 'members'      => $membersByHh->get($id, 0),
                 'sleep_spaces' => ($qbHh['sleep_total_spaces'] ?? '') ?: '—',
@@ -585,7 +652,7 @@ class DashboardController extends Controller
             'byVillage', 'byBras', 'byCluster', 'cohortByBras',
             'gpsData', 'allDates', 'tabletDatasets', 'tabletActivity',
             'householdDetails', 'membersByHh',
-            'studyNetsDetail', 'studyNetsByHh'
+            'studyNetsDetail', 'studyNetsByHh', 'byDag'
         ) + ['netsByBras' => $studyNetsDetail->groupBy('bras')->map->count()];
     }
 

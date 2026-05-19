@@ -79,6 +79,7 @@ class RedCapService
                 'content' => 'record', 'type' => 'flat',
                 'events'  => 'baseline_et_distri_arm_1',
                 'forms'   => 'form_1a_identification',
+                'exportDataAccessGroups' => 'true',
                 'fields'  => implode(',', [
                     'household_id',
                     'village', 'cluster_djigbe', 'cluster_gbonou', 'cluster_miniffi',
@@ -148,6 +149,7 @@ class RedCapService
                 'content' => 'record', 'type' => 'flat',
                 'events'  => 'baseline_et_distri_arm_1',
                 'forms'   => 'section_5_moustiquaires_imprgnes_dinsecticide_appa',
+                'exportDataAccessGroups' => 'true',
                 'fields'  => implode(',', [
                     'household_id', 'net_identifier_man', 'net_code_written',
                     'e_net_received_in_study', 'is_study_net', 'instance_net',
@@ -287,6 +289,7 @@ class RedCapService
             'identification' => [
                 'redcap.identification',
                 ['content'=>'record','type'=>'flat','events'=>'baseline_et_distri_arm_1','forms'=>'form_1a_identification',
+                 'exportDataAccessGroups'=>'true',
                  'fields'=>implode(',',['household_id','village','cluster_djigbe','cluster_gbonou','cluster_miniffi','cluster_id','bras','study_cohort','numero_menage','consent_accepted'])],
                 $t30,
             ],
@@ -311,6 +314,7 @@ class RedCapService
             'study_nets' => [
                 'redcap.study_nets',
                 ['content'=>'record','type'=>'flat','events'=>'baseline_et_distri_arm_1','forms'=>'section_5_moustiquaires_imprgnes_dinsecticide_appa',
+                 'exportDataAccessGroups'=>'true',
                  'fields'=>implode(',',['household_id','net_identifier_man','net_code_written','e_net_received_in_study','is_study_net','instance_net'])],
                 $t30,
             ],
