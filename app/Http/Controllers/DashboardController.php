@@ -430,39 +430,48 @@ class DashboardController extends Controller
             'consented' => $g->filter(fn($r) => $consentedHhIds->has($r['household_id']))->count(),
         ]);
 
+        $idMapForBras = collect($idRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->keyBy('household_id');
+
         $nets = collect($studyNetRaw)
             ->filter(fn($r) =>
                 $r['redcap_repeat_instrument'] === 'section_5_moustiquaires_imprgnes_dinsecticide_appa'
                 && $r['redcap_repeat_instance'] !== ''
                 && $consentedHhIds->has($r['household_id'])
             )
-            ->map(function ($r) use ($visitDataByHh) {
-                $visit = $visitDataByHh->get($r['household_id'], []);
+            ->map(function ($r) use ($visitDataByHh, $idMapForBras) {
+                $visit  = $visitDataByHh->get($r['household_id'], []);
+                $idData = $idMapForBras->get($r['household_id'], []);
                 return [
                     'household_id' => $r['household_id'],
                     'net_code'     => $r['net_identifier_man'] ?: '—',
                     'tablette'     => $visit['a_tablette_id'] ?? '',
                     'date_visit'   => $visit['a_date_visite_id'] ?? '',
+                    'bras'         => self::BRAS_LABELS[self::resolveBrasKey($idData)] ?? '—',
+                    'cohort'       => self::COHORT_LABELS[$idData['study_cohort'] ?? ''] ?? '—',
                 ];
             });
 
-        if ($dateFrom)       $nets = $nets->filter(fn($r) => $r['date_visit'] >= $dateFrom);
-        if ($dateTo)         $nets = $nets->filter(fn($r) => $r['date_visit'] <= $dateTo);
+        if ($dateFrom)        $nets = $nets->filter(fn($r) => $r['date_visit'] >= $dateFrom);
+        if ($dateTo)          $nets = $nets->filter(fn($r) => $r['date_visit'] <= $dateTo);
         if (!empty($tablets)) $nets = $nets->filter(fn($r) => in_array($r['tablette'], $tablets));
 
         $netsByTablet = $nets
             ->filter(fn($r) => $r['tablette'] !== '')
             ->groupBy('tablette')->sortKeys()
             ->map(fn($tNets, $tablet) => [
-                'tablet'    => $tablet,
-                'visited'   => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
-                'consented' => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
+                'tablet'     => $tablet,
+                'visited'    => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
+                'consented'  => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
                 'households' => $tNets->groupBy('household_id')->sortKeys()
                     ->map(fn($hhNets, $hhId) => [
                         'household_id' => $hhId,
                         'date_visit'   => $hhNets->first()['date_visit'],
                         'nets'         => $hhNets->pluck('net_code')->values(),
                         'total'        => $hhNets->count(),
+                        'bras'         => $hhNets->first()['bras'],
+                        'cohort'       => $hhNets->first()['cohort'],
                     ])->values(),
                 'total' => $tNets->count(),
             ])->values();
@@ -856,6 +865,8 @@ class DashboardController extends Controller
                         'date_visit'   => $hhNets->first()['date_visit'],
                         'nets'         => $hhNets->pluck('net_code')->values(),
                         'total'        => $hhNets->count(),
+                        'bras'         => $hhNets->first()['bras'],
+                        'cohort'       => $hhNets->first()['cohort'],
                     ])->values(),
                 'total' => $tNets->count(),
             ])->values();
