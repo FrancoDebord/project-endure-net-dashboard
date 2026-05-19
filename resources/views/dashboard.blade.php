@@ -164,6 +164,9 @@
         <button class="tab-btn" onclick="showTab('rapport', this)">
             &#128202; Rapport
         </button>
+        <button class="tab-btn" onclick="showTab('distribution', this)">
+            &#129498; Distribution
+        </button>
     </div>
 </nav>
 
@@ -1151,6 +1154,45 @@
             </form>
         </div>
 
+        {{-- ── Moustiquaires par bras / cohorte ── --}}
+        @if ($byBrasCohortNets->count())
+        <div class="card p-5">
+            <p class="section-title">Moustiquaires distribuées par bras et par cohorte</p>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm border-collapse">
+                    <thead>
+                        <tr>
+                            <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide rounded-tl-lg" style="background:#1A1A1A">Bras / Cohorte</th>
+                            <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide rounded-tr-lg" style="background:#1A1A1A">Moustiquaires distribuées</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @php $totalNetsDisplay = $byBrasCohortNets->sum('nets'); @endphp
+                        @foreach ($byBrasCohortNets as $bi => $b)
+                            <tr class="{{ $bi % 2 === 0 ? '' : 'bg-gray-50' }} border-b border-gray-100">
+                                <td class="px-3 py-2 font-bold text-gray-800">
+                                    <span class="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style="background:{{ $bi === 0 ? '#C41230' : '#374151' }}"></span>
+                                    {{ $b['bras'] }}
+                                </td>
+                                <td class="px-3 py-2 text-right font-bold text-gray-800">{{ $b['nets'] }}</td>
+                            </tr>
+                            @foreach ($b['cohorts'] as $c)
+                            <tr class="{{ $bi % 2 === 0 ? '' : 'bg-gray-50' }} border-b border-gray-100">
+                                <td class="px-3 py-2 pl-8 text-gray-500 text-xs">{{ $c['cohort'] }}</td>
+                                <td class="px-3 py-2 text-right text-gray-500 text-xs">{{ $c['nets'] }}</td>
+                            </tr>
+                            @endforeach
+                        @endforeach
+                        <tr style="background:#C41230">
+                            <td class="px-3 py-2 text-white font-bold text-xs uppercase">Total général</td>
+                            <td class="px-3 py-2 text-right text-white font-bold">{{ $totalNetsDisplay }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        @endif
+
         <div class="card p-5" style="background:#EFF6FF;border:1px solid #BFDBFE">
             <p class="text-sm font-semibold text-blue-700 mb-2">Le rapport d'activités PDF contient :</p>
             <ul class="text-sm text-blue-600 space-y-1 list-disc list-inside">
@@ -1233,6 +1275,188 @@
         </div>
 
     </div>{{-- /tab-rapport --}}
+
+    {{-- ══ TAB: Distribution des moustiquaires ══ --}}
+    <div id="tab-distribution" class="tab-panel space-y-6">
+
+        {{-- ── Filters ── --}}
+        <div class="card p-5">
+            <p class="section-title">Distribution des moustiquaires par binôme</p>
+
+            <div class="flex flex-wrap items-end gap-4 mb-5">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Date de début</label>
+                    <input type="date" id="distFrom"
+                           class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                           onchange="applyDistFilter()">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Date de fin</label>
+                    <input type="date" id="distTo"
+                           class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                           onchange="applyDistFilter()">
+                </div>
+                <button onclick="resetDistFilter()"
+                        class="text-xs text-gray-500 underline hover:text-red-600 transition pb-1.5">
+                    Réinitialiser
+                </button>
+                <div id="distSummary" class="text-sm text-gray-500 pb-1.5">
+                    <span class="font-bold text-gray-800">{{ $netsByTablet->sum('visited') }}</span> visités ·
+                    <span class="font-bold text-gray-800">{{ $netsByTablet->sum('consented') }}</span> enrôlés ·
+                    <span id="distTotalNets" class="font-bold text-gray-800">{{ $netsByTablet->sum('total') }}</span> moustiquaires
+                    (<span id="distTotalHH">{{ $netsByTablet->sum(fn($t) => count($t['households'])) }}</span> ménages)
+                </div>
+            </div>
+
+            @if ($netsByTablet->isEmpty())
+                <p class="text-xs text-gray-400 italic">Aucune moustiquaire enregistrée.</p>
+            @else
+
+            @php
+                $distColors = ['#C41230','#374151','#D97706','#16A34A','#7C3AED','#0891B2','#DB2777','#059669','#EA580C','#4338CA','#0D9488','#9333EA'];
+            @endphp
+
+            @foreach ($netsByTablet as $dti => $tabletGroup)
+            <div class="dist-tablet-section mb-6" data-tablet="{{ $tabletGroup['tablet'] }}">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="inline-block w-3 h-3 rounded-sm flex-shrink-0"
+                          style="background:{{ $distColors[$dti % count($distColors)] }}"></span>
+                    <p class="font-bold text-sm text-gray-800">
+                        Tablette {{ $tabletGroup['tablet'] }}
+                        <span class="font-normal text-gray-500 text-xs">
+                            — {{ $tabletGroup['visited'] }} visité(s)
+                            · {{ $tabletGroup['consented'] }} enrôlé(s)
+                            · <span class="dist-tablet-nets">{{ $tabletGroup['total'] }}</span> moustiquaire(s)
+                            sur <span class="dist-tablet-hh">{{ count($tabletGroup['households']) }}</span> ménage(s)
+                        </span>
+                    </p>
+                </div>
+                <div class="overflow-x-auto rounded-xl border border-gray-200">
+                    <table class="w-full text-xs border-collapse">
+                        <thead>
+                            <tr>
+                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:36%">Code Ménage</th>
+                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:18%">Date visite</th>
+                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A">Codes Moustiquaires</th>
+                                <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:10%">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($tabletGroup['households'] as $hi => $hh)
+                            <tr class="dist-hh-row border-b border-gray-100 {{ $hi % 2 === 1 ? 'bg-gray-50' : '' }}"
+                                data-date="{{ $hh['date_visit'] }}"
+                                data-nets="{{ $hh['total'] }}">
+                                <td class="px-3 py-2 font-mono">{{ $hh['household_id'] }}</td>
+                                <td class="px-3 py-2 text-gray-600">
+                                    {{ $hh['date_visit'] ? \Carbon\Carbon::parse($hh['date_visit'])->format('d/m/Y') : '—' }}
+                                </td>
+                                <td class="px-3 py-2 text-gray-700">{{ $hh['nets']->implode(' · ') }}</td>
+                                <td class="px-3 py-2 text-right font-bold text-gray-800">{{ $hh['total'] }}</td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot>
+                            <tr style="background:#C41230">
+                                <td colspan="3" class="px-3 py-2 text-white font-bold text-xs">Total Tablette {{ $tabletGroup['tablet'] }}</td>
+                                <td class="px-3 py-2 text-right text-white font-bold dist-tablet-total">{{ $tabletGroup['total'] }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+            @endforeach
+
+            @endif
+        </div>
+
+        {{-- ── PDF Export : détail ── --}}
+        <div class="card p-5">
+            <p class="section-title">Exporter en PDF — Détail par ménage</p>
+            <form method="GET" action="{{ route('distribution.pdf') }}" target="_blank" class="space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Date de début</label>
+                        <input type="date" name="date_from"
+                               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Date de fin</label>
+                        <input type="date" name="date_to"
+                               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Tablettes / Binômes</label>
+                        <select name="tablets[]" multiple
+                                size="{{ max(3, min(8, $reportTablets->count())) }}"
+                                class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-200">
+                            @foreach ($reportTablets as $t)
+                                <option value="{{ $t }}">Tablette {{ $t }}</option>
+                            @endforeach
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">Ctrl+clic = multi-sélection · sans sélection = toutes</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 pt-1">
+                    <button type="submit"
+                            style="background:#C41230"
+                            class="inline-flex items-center gap-2 text-white text-sm font-bold px-6 py-2.5 rounded-xl hover:opacity-90 active:scale-95 transition shadow">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Télécharger PDF distribution
+                    </button>
+                    <p class="text-xs text-gray-400">Format portrait A4 · détail par ménage et par tablette</p>
+                </div>
+            </form>
+        </div>
+
+        {{-- ── PDF Export : résumé ── --}}
+        <div class="card p-5" style="background:#F0FDF4;border:1px solid #BBF7D0">
+            <p class="section-title" style="color:#166534">Exporter en PDF — Résumé par binôme</p>
+            <p class="text-xs text-green-700 mb-4">
+                Tableau synthèse par tablette et par date : ménages visités, enrôlés, moustiquaires distribuées et marquées.
+            </p>
+            <form method="GET" action="{{ route('distribution.resume.pdf') }}" target="_blank" class="space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Date de début</label>
+                        <input type="date" name="date_from"
+                               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-200">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Date de fin</label>
+                        <input type="date" name="date_to"
+                               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-200">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Tablettes / Binômes</label>
+                        <select name="tablets[]" multiple
+                                size="{{ max(3, min(8, $reportTablets->count())) }}"
+                                class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-200">
+                            @foreach ($reportTablets as $t)
+                                <option value="{{ $t }}">Tablette {{ $t }}</option>
+                            @endforeach
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">Ctrl+clic = multi-sélection · sans sélection = toutes</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 pt-1">
+                    <button type="submit"
+                            style="background:#16A34A"
+                            class="inline-flex items-center gap-2 text-white text-sm font-bold px-6 py-2.5 rounded-xl hover:opacity-90 active:scale-95 transition shadow">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Télécharger le résumé PDF
+                    </button>
+                    <p class="text-xs text-gray-400">Format portrait A4 · une ligne par date et par binôme</p>
+                </div>
+            </form>
+        </div>
+
+    </div>{{-- /tab-distribution --}}
 
 </div>{{-- /max-w --}}
 
@@ -1466,6 +1690,42 @@ new Chart(document.getElementById('chartPerformance'), {
     },
 });
 @endif
+
+// ── Distribution filter ──
+function applyDistFilter() {
+    const from = document.getElementById('distFrom').value;
+    const to   = document.getElementById('distTo').value;
+    let totalNets = 0, totalHH = 0;
+
+    document.querySelectorAll('.dist-tablet-section').forEach(section => {
+        let tNets = 0, tHH = 0;
+        section.querySelectorAll('.dist-hh-row').forEach(row => {
+            const date = row.dataset.date || '';
+            const show = (!from || date >= from) && (!to || date <= to);
+            row.style.display = show ? '' : 'none';
+            if (show) { tNets += parseInt(row.dataset.nets || 0); tHH++; }
+        });
+        section.style.display = tNets > 0 ? '' : 'none';
+        const elNets  = section.querySelector('.dist-tablet-nets');
+        const elHH    = section.querySelector('.dist-tablet-hh');
+        const elTotal = section.querySelector('.dist-tablet-total');
+        if (elNets)  elNets.textContent  = tNets;
+        if (elHH)    elHH.textContent    = tHH;
+        if (elTotal) elTotal.textContent = tNets;
+        totalNets += tNets; totalHH += tHH;
+    });
+
+    const elTN = document.getElementById('distTotalNets');
+    const elTH = document.getElementById('distTotalHH');
+    if (elTN) elTN.textContent = totalNets;
+    if (elTH) elTH.textContent = totalHH;
+}
+
+function resetDistFilter() {
+    document.getElementById('distFrom').value = '';
+    document.getElementById('distTo').value   = '';
+    applyDistFilter();
+}
 
 // ── Performance PDF export (canvas capture) ──
 function downloadPerformancePdf() {

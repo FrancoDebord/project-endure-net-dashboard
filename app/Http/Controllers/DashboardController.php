@@ -386,6 +386,223 @@ class DashboardController extends Controller
         return $pdf->download('performance-binomes-' . now()->format('Y-m-d') . '.pdf');
     }
 
+    public function exportDistributionPdf(Request $request): \Illuminate\Http\Response
+    {
+        set_time_limit(300);
+        $this->redcap->warmAll();
+
+        $dateFrom = $request->input('date_from', '');
+        $dateTo   = $request->input('date_to', '');
+        $tablets  = array_values(array_filter((array)$request->input('tablets', [])));
+
+        $visiteRaw   = $this->redcap->getVisiteData();
+        $idRaw       = $this->redcap->getIdentificationData();
+        $qbRaw       = $this->redcap->getBaselineQuestionnaireData();
+        $studyNetRaw = $this->redcap->getStudyNetData();
+
+        $qbByHh = collect($qbRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+            ->keyBy('household_id');
+
+        $consentedHhIds = collect($idRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->unique('household_id')
+            ->map(function ($r) use ($qbByHh) {
+                $consent = ($r['consent_accepted'] ?? '') ?: ($qbByHh->get($r['household_id'], [])['consent_accepted'] ?? '');
+                return array_merge($r, ['consent_accepted' => $consent]);
+            })
+            ->where('consent_accepted', '1')
+            ->pluck('household_id')->flip();
+
+        $visitDataByHh = collect($visiteRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->keyBy('household_id');
+
+        // Visit stats per tablet (with date + tablet filters)
+        $visitsForStats = collect($visiteRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['a_tablette_id'] ?? '') !== '')
+            ->unique('household_id');
+        if ($dateFrom)        $visitsForStats = $visitsForStats->filter(fn($r) => ($r['a_date_visite_id'] ?? '') >= $dateFrom);
+        if ($dateTo)          $visitsForStats = $visitsForStats->filter(fn($r) => ($r['a_date_visite_id'] ?? '') <= $dateTo);
+        if (!empty($tablets)) $visitsForStats = $visitsForStats->filter(fn($r) => in_array($r['a_tablette_id'] ?? '', $tablets));
+        $visitStatsByTablet = $visitsForStats->groupBy('a_tablette_id')->map(fn($g) => [
+            'visited'   => $g->count(),
+            'consented' => $g->filter(fn($r) => $consentedHhIds->has($r['household_id']))->count(),
+        ]);
+
+        $nets = collect($studyNetRaw)
+            ->filter(fn($r) =>
+                $r['redcap_repeat_instrument'] === 'section_5_moustiquaires_imprgnes_dinsecticide_appa'
+                && $r['redcap_repeat_instance'] !== ''
+                && $consentedHhIds->has($r['household_id'])
+            )
+            ->map(function ($r) use ($visitDataByHh) {
+                $visit = $visitDataByHh->get($r['household_id'], []);
+                return [
+                    'household_id' => $r['household_id'],
+                    'net_code'     => $r['net_identifier_man'] ?: '—',
+                    'tablette'     => $visit['a_tablette_id'] ?? '',
+                    'date_visit'   => $visit['a_date_visite_id'] ?? '',
+                ];
+            });
+
+        if ($dateFrom)       $nets = $nets->filter(fn($r) => $r['date_visit'] >= $dateFrom);
+        if ($dateTo)         $nets = $nets->filter(fn($r) => $r['date_visit'] <= $dateTo);
+        if (!empty($tablets)) $nets = $nets->filter(fn($r) => in_array($r['tablette'], $tablets));
+
+        $netsByTablet = $nets
+            ->filter(fn($r) => $r['tablette'] !== '')
+            ->groupBy('tablette')->sortKeys()
+            ->map(fn($tNets, $tablet) => [
+                'tablet'    => $tablet,
+                'visited'   => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
+                'consented' => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
+                'households' => $tNets->groupBy('household_id')->sortKeys()
+                    ->map(fn($hhNets, $hhId) => [
+                        'household_id' => $hhId,
+                        'date_visit'   => $hhNets->first()['date_visit'],
+                        'nets'         => $hhNets->pluck('net_code')->values(),
+                        'total'        => $hhNets->count(),
+                    ])->values(),
+                'total' => $tNets->count(),
+            ])->values();
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('distribution-pdf', compact(
+            'netsByTablet', 'dateFrom', 'dateTo', 'tablets'
+        ));
+        $pdf->setPaper('A4', 'portrait');
+
+        $prefix = !empty($tablets)
+            ? 'Tablette-' . implode('-', $tablets) . '_'
+            : 'Toutes-tablettes_';
+
+        return $pdf->download($prefix . 'distribution-moustiquaires_' . now()->format('Y-m-d') . '.pdf');
+    }
+
+    public function exportDistributionResumePdf(Request $request): \Illuminate\Http\Response
+    {
+        set_time_limit(300);
+        $this->redcap->warmAll();
+
+        $dateFrom = $request->input('date_from', '');
+        $dateTo   = $request->input('date_to', '');
+        $tablets  = array_values(array_filter((array)$request->input('tablets', [])));
+
+        $visiteRaw   = $this->redcap->getVisiteData();
+        $idRaw       = $this->redcap->getIdentificationData();
+        $qbRaw       = $this->redcap->getBaselineQuestionnaireData();
+        $studyNetRaw = $this->redcap->getStudyNetData();
+
+        $qbByHh = collect($qbRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+            ->keyBy('household_id');
+
+        $consentedHhIds = collect($idRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->unique('household_id')
+            ->map(function ($r) use ($qbByHh) {
+                $consent = ($r['consent_accepted'] ?? '') ?: ($qbByHh->get($r['household_id'], [])['consent_accepted'] ?? '');
+                return array_merge($r, ['consent_accepted' => $consent]);
+            })
+            ->where('consent_accepted', '1')
+            ->pluck('household_id')->flip();
+
+        $visitDataByHh = collect($visiteRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->keyBy('household_id');
+
+        // Visit stats per tablet (filtered)
+        $visitsForStats = collect($visiteRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['a_tablette_id'] ?? '') !== '')
+            ->unique('household_id');
+        if ($dateFrom)        $visitsForStats = $visitsForStats->filter(fn($r) => ($r['a_date_visite_id'] ?? '') >= $dateFrom);
+        if ($dateTo)          $visitsForStats = $visitsForStats->filter(fn($r) => ($r['a_date_visite_id'] ?? '') <= $dateTo);
+        if (!empty($tablets)) $visitsForStats = $visitsForStats->filter(fn($r) => in_array($r['a_tablette_id'] ?? '', $tablets));
+        $visitStatsByTablet = $visitsForStats->groupBy('a_tablette_id')->map(fn($g) => [
+            'visited'   => $g->count(),
+            'consented' => $g->filter(fn($r) => $consentedHhIds->has($r['household_id']))->count(),
+        ]);
+
+        $idMapForBras = collect($idRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->keyBy('household_id');
+
+        // Net records
+        $nets = collect($studyNetRaw)
+            ->filter(fn($r) =>
+                $r['redcap_repeat_instrument'] === 'section_5_moustiquaires_imprgnes_dinsecticide_appa'
+                && $r['redcap_repeat_instance'] !== ''
+                && $consentedHhIds->has($r['household_id'])
+            )
+            ->map(function ($r) use ($visitDataByHh, $idMapForBras) {
+                $visit  = $visitDataByHh->get($r['household_id'], []);
+                $idData = $idMapForBras->get($r['household_id'], []);
+                return [
+                    'household_id' => $r['household_id'],
+                    'tablette'     => $visit['a_tablette_id'] ?? '',
+                    'date_visit'   => $visit['a_date_visite_id'] ?? '',
+                    'marked'       => ($r['net_identifier_man'] ?? '') !== '',
+                    'bras'         => self::BRAS_LABELS[self::resolveBrasKey($idData)] ?? '—',
+                    'cohort'       => self::COHORT_LABELS[$idData['study_cohort'] ?? ''] ?? '—',
+                ];
+            });
+
+        if ($dateFrom)        $nets = $nets->filter(fn($r) => $r['date_visit'] >= $dateFrom);
+        if ($dateTo)          $nets = $nets->filter(fn($r) => $r['date_visit'] <= $dateTo);
+        if (!empty($tablets)) $nets = $nets->filter(fn($r) => in_array($r['tablette'], $tablets));
+
+        // Group per tablet → per date
+        $summary = $nets
+            ->filter(fn($r) => $r['tablette'] !== '')
+            ->groupBy('tablette')->sortKeys()
+            ->map(fn($tNets, $tablet) => [
+                'tablet'           => $tablet,
+                'visited'          => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
+                'consented'        => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
+                'byDate'           => $tNets->groupBy('date_visit')->sortKeys()
+                    ->map(fn($dNets, $date) => [
+                        'date'        => $date,
+                        'hh_count'    => $dNets->pluck('household_id')->unique()->count(),
+                        'distributed' => $dNets->count(),
+                        'marked'      => $dNets->where('marked', true)->count(),
+                    ])->values(),
+                'total_distributed' => $tNets->count(),
+                'total_marked'      => $tNets->where('marked', true)->count(),
+                'total_hh'          => $tNets->pluck('household_id')->unique()->count(),
+            ])->values();
+
+        $grandDistributed = $summary->sum('total_distributed');
+        $grandMarked      = $summary->sum('total_marked');
+        $grandHh          = $nets->pluck('household_id')->unique()->count();
+
+        $byBrasCohortNets = $nets
+            ->filter(fn($r) => $r['bras'] !== '—')
+            ->groupBy('bras')->sortKeys()
+            ->map(fn($brasGroup, $brasLabel) => [
+                'bras'    => $brasLabel,
+                'nets'    => $brasGroup->count(),
+                'marked'  => $brasGroup->where('marked', true)->count(),
+                'cohorts' => $brasGroup->groupBy('cohort')->sortKeys()
+                    ->map(fn($g, $cohort) => [
+                        'cohort' => $cohort,
+                        'nets'   => $g->count(),
+                        'marked' => $g->where('marked', true)->count(),
+                    ])->values(),
+            ])->values();
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('distribution-resume-pdf', compact(
+            'summary', 'grandDistributed', 'grandMarked', 'grandHh',
+            'byBrasCohortNets', 'dateFrom', 'dateTo', 'tablets'
+        ));
+        $pdf->setPaper('A4', 'portrait');
+
+        $prefix = !empty($tablets)
+            ? 'Tablette-' . implode('-', $tablets) . '_'
+            : 'Toutes-tablettes_';
+
+        return $pdf->download($prefix . 'resume-distribution_' . now()->format('Y-m-d') . '.pdf');
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // HELPERS
     // ══════════════════════════════════════════════════════════════════════════
@@ -600,8 +817,9 @@ class DashboardController extends Controller
         // Visit-specific fields (date, tablette) keyed by household_id
         $visitDataByHh = $visits->keyBy('household_id');
 
-        $studyNetsDetail = $studyNetsFiltered->map(function ($r) use ($allHouseholdsById) {
-            $hh = $allHouseholdsById->get($r['household_id'], []);
+        $studyNetsDetail = $studyNetsFiltered->map(function ($r) use ($allHouseholdsById, $visitDataByHh) {
+            $hh    = $allHouseholdsById->get($r['household_id'], []);
+            $visit = $visitDataByHh->get($r['household_id'], []);
             return [
                 'household_id' => $r['household_id'],
                 'instance'     => $r['redcap_repeat_instance'],
@@ -611,6 +829,8 @@ class DashboardController extends Controller
                 'village'      => self::VILLAGE_LABELS[$hh['village'] ?? ''] ?? '—',
                 'cluster'      => self::CLUSTER_LABELS[self::extractCluster($hh)] ?? '—',
                 'dag'          => $hh['redcap_data_access_group'] ?? ($r['redcap_data_access_group'] ?? ''),
+                'tablette'     => $visit['a_tablette_id'] ?? '',
+                'date_visit'   => $visit['a_date_visite_id'] ?? '',
             ];
         })->values();
 
@@ -618,6 +838,27 @@ class DashboardController extends Controller
             ->groupBy('dag')
             ->map(fn($g, $d) => ['dag' => $d ?: 'Non défini', 'count' => $g->count()])
             ->sortKeys()->values();
+
+        $visitsByTablet = $visits
+            ->filter(fn($r) => ($r['a_tablette_id'] ?? '') !== '')
+            ->groupBy('a_tablette_id');
+
+        $netsByTablet = $studyNetsDetail
+            ->filter(fn($r) => $r['tablette'] !== '')
+            ->groupBy('tablette')->sortKeys()
+            ->map(fn($tNets, $tablet) => [
+                'tablet'     => $tablet,
+                'visited'    => $visitsByTablet->get($tablet, collect())->count(),
+                'consented'  => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
+                'households' => $tNets->groupBy('household_id')->sortKeys()
+                    ->map(fn($hhNets, $hhId) => [
+                        'household_id' => $hhId,
+                        'date_visit'   => $hhNets->first()['date_visit'],
+                        'nets'         => $hhNets->pluck('net_code')->values(),
+                        'total'        => $hhNets->count(),
+                    ])->values(),
+                'total' => $tNets->count(),
+            ])->values();
 
         $householdDetails = $allHouseholds->map(function ($hh) use ($qb, $membersByHh, $oldNetsByHh, $studyNetsByHh, $visitDataByHh) {
             $id         = $hh['household_id'];
@@ -647,12 +888,26 @@ class DashboardController extends Controller
             ];
         });
 
+        $byBrasCohortNets = $studyNetsDetail
+            ->filter(fn($r) => $r['bras'] !== '—')
+            ->groupBy('bras')->sortKeys()
+            ->map(fn($brasGroup, $brasLabel) => [
+                'bras'    => $brasLabel,
+                'nets'    => $brasGroup->count(),
+                'cohorts' => $brasGroup->groupBy('cohort')->sortKeys()
+                    ->map(fn($g, $cohort) => [
+                        'cohort' => $cohort,
+                        'nets'   => $g->count(),
+                    ])->values(),
+            ])->values();
+
         return compact(
             'totalVisited', 'totalConsented',
             'byVillage', 'byBras', 'byCluster', 'cohortByBras',
             'gpsData', 'allDates', 'tabletDatasets', 'tabletActivity',
             'householdDetails', 'membersByHh',
-            'studyNetsDetail', 'studyNetsByHh', 'byDag'
+            'studyNetsDetail', 'studyNetsByHh', 'byDag', 'netsByTablet',
+            'byBrasCohortNets'
         ) + ['netsByBras' => $studyNetsDetail->groupBy('bras')->map->count()];
     }
 
