@@ -223,6 +223,50 @@
             </div>
 
         </div>
+
+        {{-- Code d'erreur (exclusion) --}}
+        <div class="mt-3">
+            <label class="text-xs text-gray-400 block mb-1.5">
+                Code d'erreur
+                <span class="text-gray-300 font-normal">— décochez les codes à exclure de l'export</span>
+            </label>
+            <div class="flex flex-wrap gap-2" id="code-checkboxes">
+                @foreach ($filterCodes as $code => $info)
+                @php
+                    preg_match('/^Q-([A-Z]+)-/', $code, $m);
+                    $chipCls = match($m[1] ?? '') {
+                        'ID'   => 'border-purple-200 bg-purple-50 hover:bg-purple-100',
+                        'VIS'  => 'border-slate-200  bg-slate-50  hover:bg-slate-100',
+                        'BASE' => 'border-amber-200  bg-amber-50  hover:bg-amber-100',
+                        'CNS'  => 'border-red-200    bg-red-50    hover:bg-red-100',
+                        'GPS'  => 'border-teal-200   bg-teal-50   hover:bg-teal-100',
+                        'SLP'  => 'border-blue-200   bg-blue-50   hover:bg-blue-100',
+                        'EDU'  => 'border-indigo-200 bg-indigo-50 hover:bg-indigo-100',
+                        'MBR'  => 'border-orange-200 bg-orange-50 hover:bg-orange-100',
+                        'NET'  => 'border-green-200  bg-green-50  hover:bg-green-100',
+                        'AE'   => 'border-pink-200   bg-pink-50   hover:bg-pink-100',
+                        'UA'   => 'border-violet-200 bg-violet-50 hover:bg-violet-100',
+                        'FW'   => 'border-sky-200    bg-sky-50    hover:bg-sky-100',
+                        default => 'border-gray-200  bg-gray-50   hover:bg-gray-100',
+                    };
+                @endphp
+                <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer transition select-none {{ $chipCls }}"
+                       title="{{ $info['title'] }}">
+                    <input type="checkbox" value="{{ $code }}" class="ms-cb-code rounded border-gray-300 cursor-pointer accent-red-700"
+                           checked onchange="onCodeChange()">
+                    <span class="font-mono font-bold text-xs" style="color:#C41230">{{ $code }}</span>
+                    <span class="text-gray-500 text-xs">({{ $info['count'] }})</span>
+                </label>
+                @endforeach
+            </div>
+            <div class="flex items-center gap-3 mt-2">
+                <button onclick="setAllCodes(true)"
+                        class="text-xs text-gray-500 hover:text-red-700 underline transition">Tout inclure</button>
+                <button onclick="setAllCodes(false)"
+                        class="text-xs text-gray-500 hover:text-red-700 underline transition">Tout exclure</button>
+                <span id="code-excl-count" class="text-xs text-gray-400"></span>
+            </div>
+        </div>
         <div class="mt-3 flex items-center gap-3">
             <button onclick="resetFilters()"
                     class="text-xs text-gray-500 hover:text-red-700 underline transition">
@@ -284,6 +328,7 @@
                     @endphp
                     <tr class="query-row hover:bg-gray-50 transition-colors cursor-pointer"
                         data-severity="{{ $q['severity'] }}"
+                        data-code="{{ $q['code'] }}"
                         data-form="{{ $q['form_label'] }}"
                         data-tablet="{{ $q['tablet'] }}"
                         data-initials="{{ $q['initials'] }}"
@@ -367,6 +412,25 @@
 </main>
 
 <script>
+// ── Code filter (exclusion mode) ──────────────────────────────────────────────
+
+function getExcludedCodes() {
+    return [...document.querySelectorAll('.ms-cb-code:not(:checked)')].map(cb => cb.value);
+}
+
+function onCodeChange() {
+    const total    = document.querySelectorAll('.ms-cb-code').length;
+    const excluded = document.querySelectorAll('.ms-cb-code:not(:checked)').length;
+    const el = document.getElementById('code-excl-count');
+    if (el) el.textContent = excluded === 0 ? '' : excluded + ' code(s) exclu(s) de l\'export';
+    filterQueries();
+}
+
+function setAllCodes(checked) {
+    document.querySelectorAll('.ms-cb-code').forEach(cb => cb.checked = checked);
+    onCodeChange();
+}
+
 // ── Multi-select helpers ─────────────────────────────────────────────────────
 
 const MS_LABELS = {
@@ -447,7 +511,7 @@ function downloadPdf() {
         params.append('selected[]', cb.value);
     });
 
-    // Also pass active filters for PDF header display
+    // Pass active filters for PDF header display
     const search = document.getElementById('f-search').value;
     const hh     = document.getElementById('f-hh').value;
     if (search) params.set('search', search);
@@ -455,6 +519,9 @@ function downloadPdf() {
     ['severity', 'form', 'tablet', 'initials'].forEach(key => {
         getMsValues(key).forEach(v => params.append(key + '[]', v));
     });
+
+    // Pass excluded codes for PDF header display
+    getExcludedCodes().forEach(v => params.append('excluded_codes[]', v));
 
     window.open('{{ route('queries.pdf') }}?' + params.toString(), '_blank');
 }
@@ -477,22 +544,24 @@ function expandAll() {
 // ── Filter logic ─────────────────────────────────────────────────────────────
 
 function filterQueries() {
-    const search   = document.getElementById('f-search').value.toLowerCase();
-    const hh       = document.getElementById('f-hh').value.toLowerCase();
-    const severity = getMsValues('severity');
-    const form     = getMsValues('form');
-    const tablet   = getMsValues('tablet');
-    const initials = getMsValues('initials');
+    const search       = document.getElementById('f-search').value.toLowerCase();
+    const hh           = document.getElementById('f-hh').value.toLowerCase();
+    const severity     = getMsValues('severity');
+    const form         = getMsValues('form');
+    const tablet       = getMsValues('tablet');
+    const initials     = getMsValues('initials');
+    const excludedCodes = getExcludedCodes();
 
     let visible = 0;
     document.querySelectorAll('.query-row').forEach(row => {
         const show =
             (!search   || row.dataset.search.includes(search)) &&
             (!hh       || row.dataset.hh.toLowerCase().includes(hh)) &&
-            (!severity.length || severity.includes(row.dataset.severity)) &&
-            (!form.length     || form.includes(row.dataset.form)) &&
-            (!tablet.length   || tablet.includes(row.dataset.tablet)) &&
-            (!initials.length || initials.includes(row.dataset.initials));
+            (!severity.length      || severity.includes(row.dataset.severity)) &&
+            (!form.length          || form.includes(row.dataset.form)) &&
+            (!tablet.length        || tablet.includes(row.dataset.tablet)) &&
+            (!initials.length      || initials.includes(row.dataset.initials)) &&
+            (!excludedCodes.length || !excludedCodes.includes(row.dataset.code));
 
         row.classList.toggle('hidden-row', !show);
         const idx = row.getAttribute('onclick').match(/\d+/)?.[0];
@@ -519,7 +588,8 @@ function resetFilters() {
         lbl.classList.add('text-gray-400');
         lbl.classList.remove('text-gray-800', 'font-semibold');
     });
-    filterQueries();
+    // Re-include all codes
+    setAllCodes(true);
 }
 
 // Init selection count on load

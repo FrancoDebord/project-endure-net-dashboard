@@ -27,11 +27,18 @@ class DashboardController extends Controller
         'GB' => 'Gbonou', '2' => 'Gbonou',
         'MI' => 'Miniffi', '3' => 'Miniffi',
     ];
-    private const BRAS_LABELS    = ['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'];
-    // Bras par grappe village-spécifique (valeurs des variables cluster_djigbe/gbonou/miniffi)
-    private const BRAS_FROM_DJIGBE  = ['1' => '1', '2' => '2'];               // 1=PD, 2=G2
-    private const BRAS_FROM_GBONOU  = ['1' => '2', '2' => '2', '3' => '1'];  // 1,2=G2, 3=PD
-    private const BRAS_FROM_MINIFFI = ['1' => '2', '2' => '1', '3' => '1'];  // 1=G2, 2,3=PD
+    private const BRAS_LABELS = ['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'];
+    // Cluster global (1-8) → bras : PD si cluster ∈ {1,5,7,8}, G2 si ∈ {2,3,4,6}
+    private const BRAS_FROM_CLUSTER = [
+        '1' => '1', // Djigbe G1   → PERMANET DUAL
+        '2' => '2', // Djigbe G2   → INTERCEPTOR G2
+        '3' => '2', // Gbonou G1   → INTERCEPTOR G2
+        '4' => '2', // Gbonou G2   → INTERCEPTOR G2
+        '5' => '1', // Gbonou G3   → PERMANET DUAL
+        '6' => '2', // Miniffi G1  → INTERCEPTOR G2
+        '7' => '1', // Miniffi G2  → PERMANET DUAL
+        '8' => '1', // Miniffi G3  → PERMANET DUAL
+    ];
     private const COHORT_LABELS  = ['1' => 'Cohorte A', '2' => 'Cohorte B'];
     private const TABLET_COLORS  = [
         '#C41230','#374151','#D97706','#16A34A',
@@ -71,22 +78,12 @@ class DashboardController extends Controller
         return '';
     }
 
-    /**
-     * Resolves the bras key ('1'=PERMANET DUAL, '2'=INTERCEPTOR G2) for a household row.
-     * Priority: village-specific cluster fields → bras field → household_id parsing.
-     */
     private static function resolveBrasKey(array $hh): string
     {
-        $djigbe  = $hh['cluster_djigbe']  ?? '';
-        $gbonou  = $hh['cluster_gbonou']  ?? '';
-        $miniffi = $hh['cluster_miniffi'] ?? '';
-
-        // Use isset so unrecognised / '0' values fall through to the next village variable
-        if (isset(self::BRAS_FROM_DJIGBE[$djigbe]))   return self::BRAS_FROM_DJIGBE[$djigbe];
-        if (isset(self::BRAS_FROM_GBONOU[$gbonou]))   return self::BRAS_FROM_GBONOU[$gbonou];
-        if (isset(self::BRAS_FROM_MINIFFI[$miniffi])) return self::BRAS_FROM_MINIFFI[$miniffi];
-
-        // Last resort: parse the household ID (bras field is calculated, not stored)
+        $cluster = ($hh['cluster_djigbe']  ?? '')
+                ?: ($hh['cluster_gbonou']  ?? '')
+                ?: ($hh['cluster_miniffi'] ?? '');
+        if (isset(self::BRAS_FROM_CLUSTER[$cluster])) return self::BRAS_FROM_CLUSTER[$cluster];
         return self::inferBrasKey($hh['household_id'] ?? '');
     }
 
@@ -905,10 +902,36 @@ class DashboardController extends Controller
             ->map(fn($brasGroup, $brasLabel) => [
                 'bras'    => $brasLabel,
                 'nets'    => $brasGroup->count(),
+                'marked'  => $brasGroup->filter(fn($r) => $r['net_code'] !== '—')->count(),
                 'cohorts' => $brasGroup->groupBy('cohort')->sortKeys()
                     ->map(fn($g, $cohort) => [
                         'cohort' => $cohort,
                         'nets'   => $g->count(),
+                        'marked' => $g->filter(fn($r) => $r['net_code'] !== '—')->count(),
+                    ])->values(),
+            ])->values();
+
+        // Cohorts ordered for pivot columns
+        $allCohorts = $studyNetsDetail
+            ->pluck('cohort')
+            ->filter(fn($c) => $c !== '—' && $c !== '')
+            ->unique()->sort()->values();
+
+        // Pivot: bras → grappes (village/grappe rows) × cohort columns
+        $byBrasCohortDetail = $studyNetsDetail
+            ->filter(fn($r) => $r['bras'] !== '—')
+            ->groupBy('bras')->sortKeys()
+            ->map(fn($brasGroup, $brasLabel) => [
+                'bras'      => $brasLabel,
+                'total'     => $brasGroup->count(),
+                'marked'    => $brasGroup->filter(fn($r) => $r['net_code'] !== '—')->count(),
+                'by_cohort' => $brasGroup->groupBy('cohort')->map->count()->toArray(),
+                'grappes'   => $brasGroup->groupBy('cluster')->sortKeys()
+                    ->map(fn($grappeGroup, $grappeName) => [
+                        'label'     => $grappeName,
+                        'total'     => $grappeGroup->count(),
+                        'marked'    => $grappeGroup->filter(fn($r) => $r['net_code'] !== '—')->count(),
+                        'by_cohort' => $grappeGroup->groupBy('cohort')->map->count()->toArray(),
                     ])->values(),
             ])->values();
 
@@ -918,7 +941,7 @@ class DashboardController extends Controller
             'gpsData', 'allDates', 'tabletDatasets', 'tabletActivity',
             'householdDetails', 'membersByHh',
             'studyNetsDetail', 'studyNetsByHh', 'byDag', 'netsByTablet',
-            'byBrasCohortNets'
+            'byBrasCohortNets', 'byBrasCohortDetail', 'allCohorts'
         ) + ['netsByBras' => $studyNetsDetail->groupBy('bras')->map->count()];
     }
 

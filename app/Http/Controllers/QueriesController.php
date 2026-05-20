@@ -28,10 +28,11 @@ class QueriesController extends Controller
     ];
     // Bras numérique → code dans l'identifiant
     private const BRAS_CODE = ['1' => 'PD', '2' => 'G2'];
-    // Bras par grappe village-spécifique (mêmes règles que DashboardController)
-    private const BRAS_FROM_DJIGBE  = ['1' => '1', '2' => '2'];
-    private const BRAS_FROM_GBONOU  = ['1' => '2', '2' => '2', '3' => '1'];
-    private const BRAS_FROM_MINIFFI = ['1' => '2', '2' => '1', '3' => '1'];
+    // Cluster global (1-8) → bras : PD si ∈ {1,5,7,8}, G2 si ∈ {2,3,4,6}
+    private const BRAS_FROM_CLUSTER = [
+        '1' => '1', '2' => '2', '3' => '2', '4' => '2',
+        '5' => '1', '6' => '2', '7' => '1', '8' => '1',
+    ];
     // Village REDCap (code numérique ou string) → code dans l'identifiant
     private const VILLAGE_CODE = ['1' => 'DJ', '2' => 'GB', '3' => 'MI', 'DJ' => 'DJ', 'GB' => 'GB', 'MI' => 'MI'];
 
@@ -78,8 +79,11 @@ class QueriesController extends Controller
         $filterForms    = $queries->pluck('form_label')->filter()->unique()->sort()->values();
         $filterTablets  = $queries->pluck('tablet')->filter()->unique()->sort()->values();
         $filterInitials = $queries->pluck('initials')->filter()->unique()->sort()->values();
+        $filterCodes    = $queries->groupBy('code')
+            ->map(fn($group) => ['title' => $group->first()['title'], 'count' => $group->count()])
+            ->sortKeys();
 
-        return view('queries', compact('queries', 'summary', 'filterForms', 'filterTablets', 'filterInitials'));
+        return view('queries', compact('queries', 'summary', 'filterForms', 'filterTablets', 'filterInitials', 'filterCodes'));
     }
 
     public function exportPdf(Request $request): \Illuminate\Http\Response
@@ -91,17 +95,21 @@ class QueriesController extends Controller
             array_map('intval', (array) $request->input('selected', []))
         ));
 
+        // Codes to exclude (always applied, both paths)
+        $excludedCodes = array_values(array_filter((array) $request->input('excluded_codes', [])));
+
         if (!empty($selected)) {
             $queries = $allQueries->filter(fn($q) => in_array($q['_idx'], $selected))->values();
         } else {
             // No explicit selection: apply filter params (backwards-compatible fallback).
             $rawFilters = [
-                'search'   => trim($request->input('search', '')),
-                'severity' => array_values(array_filter((array) $request->input('severity', []))),
-                'form'     => array_values(array_filter((array) $request->input('form', []))),
-                'tablet'   => array_values(array_filter((array) $request->input('tablet', []))),
-                'initials' => array_values(array_filter((array) $request->input('initials', []))),
-                'hh'       => trim($request->input('hh', '')),
+                'search'        => trim($request->input('search', '')),
+                'severity'      => array_values(array_filter((array) $request->input('severity', []))),
+                'form'          => array_values(array_filter((array) $request->input('form', []))),
+                'tablet'        => array_values(array_filter((array) $request->input('tablet', []))),
+                'initials'      => array_values(array_filter((array) $request->input('initials', []))),
+                'hh'            => trim($request->input('hh', '')),
+                'excluded_codes'=> $excludedCodes,
             ];
             $queries = $allQueries->filter(function ($q) use ($rawFilters) {
                 if ($rawFilters['search'] !== '' &&
@@ -110,10 +118,11 @@ class QueriesController extends Controller
                         strtolower($rawFilters['search'])
                     )
                 ) return false;
-                if (!empty($rawFilters['severity']) && !in_array($q['severity'],   $rawFilters['severity'])) return false;
-                if (!empty($rawFilters['form'])     && !in_array($q['form_label'], $rawFilters['form']))     return false;
-                if (!empty($rawFilters['tablet'])   && !in_array($q['tablet'],     $rawFilters['tablet']))   return false;
-                if (!empty($rawFilters['initials']) && !in_array($q['initials'],   $rawFilters['initials'])) return false;
+                if (!empty($rawFilters['severity'])       && !in_array($q['severity'],   $rawFilters['severity']))       return false;
+                if (!empty($rawFilters['form'])           && !in_array($q['form_label'], $rawFilters['form']))           return false;
+                if (!empty($rawFilters['tablet'])         && !in_array($q['tablet'],     $rawFilters['tablet']))         return false;
+                if (!empty($rawFilters['initials'])       && !in_array($q['initials'],   $rawFilters['initials']))       return false;
+                if (!empty($rawFilters['excluded_codes']) &&  in_array($q['code'],       $rawFilters['excluded_codes'])) return false;
                 if ($rawFilters['hh'] !== '' &&
                     !str_contains(strtolower($q['household_id']), strtolower($rawFilters['hh']))
                 ) return false;
@@ -121,10 +130,16 @@ class QueriesController extends Controller
             })->values();
         }
 
+        // Apply excluded_codes to explicit-selection path too (safety net)
+        if (!empty($excludedCodes)) {
+            $queries = $queries->filter(fn($q) => !in_array($q['code'], $excludedCodes))->values();
+        }
+
         // Collect active filters for PDF header display (only used for display, not for filtering)
         $rawFilters = $rawFilters ?? [
-            'search' => '', 'severity' => [], 'form' => [], 'tablet' => [], 'initials' => [], 'hh' => '',
+            'search' => '', 'severity' => [], 'form' => [], 'tablet' => [], 'initials' => [], 'hh' => '', 'excluded_codes' => [],
         ];
+        $rawFilters['excluded_codes'] = $excludedCodes;
 
         $summary = [
             'total'    => $queries->count(),
@@ -139,24 +154,26 @@ class QueriesController extends Controller
             'info'     => 'Informatif',
         ];
         $filterLabels = [
-            'search'   => 'Recherche',
-            'severity' => 'Sévérité',
-            'form'     => 'Formulaire',
-            'tablet'   => 'Tablette',
-            'initials' => 'Initiales',
-            'hh'       => 'ID Ménage',
+            'search'        => 'Recherche',
+            'severity'      => 'Sévérité',
+            'form'          => 'Formulaire',
+            'tablet'        => 'Tablette',
+            'initials'      => 'Initiales',
+            'hh'            => 'ID Ménage',
+            'excluded_codes'=> 'Codes exclus',
         ];
 
         // Build human-readable active filters for the PDF header
         $activeFilters = array_filter([
-            'search'   => $rawFilters['search'],
-            'severity' => !empty($rawFilters['severity'])
+            'search'        => $rawFilters['search'],
+            'severity'      => !empty($rawFilters['severity'])
                 ? implode(', ', array_map(fn($v) => $severityLabels[$v] ?? $v, $rawFilters['severity']))
                 : '',
-            'form'     => !empty($rawFilters['form'])     ? implode(', ', $rawFilters['form'])     : '',
-            'tablet'   => !empty($rawFilters['tablet'])   ? implode(', ', $rawFilters['tablet'])   : '',
-            'initials' => !empty($rawFilters['initials']) ? implode(', ', $rawFilters['initials']) : '',
-            'hh'       => $rawFilters['hh'],
+            'form'          => !empty($rawFilters['form'])          ? implode(', ', $rawFilters['form'])          : '',
+            'tablet'        => !empty($rawFilters['tablet'])        ? implode(', ', $rawFilters['tablet'])        : '',
+            'initials'      => !empty($rawFilters['initials'])      ? implode(', ', $rawFilters['initials'])      : '',
+            'hh'            => $rawFilters['hh'],
+            'excluded_codes'=> !empty($rawFilters['excluded_codes']) ? implode(', ', $rawFilters['excluded_codes']) : '',
         ]);
 
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('queries-pdf', compact(
@@ -234,18 +251,13 @@ class QueriesController extends Controller
 
     private static function resolveBrasKey(array $hh): string
     {
-        $djigbe  = $hh['cluster_djigbe']  ?? '';
-        $gbonou  = $hh['cluster_gbonou']  ?? '';
-        $miniffi = $hh['cluster_miniffi'] ?? '';
-
-        // Use isset so unrecognised / '0' values fall through to the next village variable
-        if (isset(self::BRAS_FROM_DJIGBE[$djigbe]))   return self::BRAS_FROM_DJIGBE[$djigbe];
-        if (isset(self::BRAS_FROM_GBONOU[$gbonou]))   return self::BRAS_FROM_GBONOU[$gbonou];
-        if (isset(self::BRAS_FROM_MINIFFI[$miniffi])) return self::BRAS_FROM_MINIFFI[$miniffi];
+        $cluster = ($hh['cluster_djigbe']  ?? '')
+                ?: ($hh['cluster_gbonou']  ?? '')
+                ?: ($hh['cluster_miniffi'] ?? '');
+        if (isset(self::BRAS_FROM_CLUSTER[$cluster])) return self::BRAS_FROM_CLUSTER[$cluster];
 
         // Last resort: parse household ID (bras field is calculated, not stored in DB)
-        $id    = $hh['household_id'] ?? '';
-        $parts = explode('-', $id);
+        $parts = explode('-', $hh['household_id'] ?? '');
         if (count($parts) === 5) {
             if (strtoupper($parts[2]) === 'PD') return '1';
             if (strtoupper($parts[2]) === 'G2') return '2';

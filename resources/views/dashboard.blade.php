@@ -148,6 +148,17 @@
                     Actualiser
                 </button>
             </form>
+            <form method="POST" action="{{ route('logout') }}">
+                @csrf
+                <button type="submit"
+                        class="flex items-center gap-1.5 text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg border border-white/20 transition font-medium">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                    </svg>
+                    Déconnexion
+                </button>
+            </form>
         </div>
     </div>
 </header>
@@ -1157,38 +1168,138 @@
         {{-- ── Moustiquaires par bras / cohorte ── --}}
         @if ($byBrasCohortNets->count())
         <div class="card p-5">
-            <p class="section-title">Moustiquaires distribuées par bras et par cohorte</p>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm border-collapse">
-                    <thead>
-                        <tr>
-                            <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide rounded-tl-lg" style="background:#1A1A1A">Bras / Cohorte</th>
-                            <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide rounded-tr-lg" style="background:#1A1A1A">Moustiquaires distribuées</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @php $totalNetsDisplay = $byBrasCohortNets->sum('nets'); @endphp
-                        @foreach ($byBrasCohortNets as $bi => $b)
-                            <tr class="{{ $bi % 2 === 0 ? '' : 'bg-gray-50' }} border-b border-gray-100">
-                                <td class="px-3 py-2 font-bold text-gray-800">
-                                    <span class="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style="background:{{ $bi === 0 ? '#C41230' : '#374151' }}"></span>
+            <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+                <p class="section-title mb-0">Moustiquaires distribuées par bras et par cohorte</p>
+                {{-- Onglets Résumé / Détail --}}
+                <div class="flex rounded-lg overflow-hidden border border-gray-200 text-xs font-bold">
+                    <button id="nettab-btn-resume" onclick="showNetTab('resume')"
+                            class="px-4 py-1.5 transition"
+                            style="background:#1A1A1A;color:#fff">
+                        Résumé
+                    </button>
+                    <button id="nettab-btn-detail" onclick="showNetTab('detail')"
+                            class="px-4 py-1.5 transition bg-white text-gray-500 hover:bg-gray-50">
+                        Détail par village &amp; grappe
+                    </button>
+                </div>
+            </div>
+
+            {{-- ─ Vue Résumé ─ --}}
+            <div id="nettab-resume">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm border-collapse">
+                        <thead>
+                            <tr>
+                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide rounded-tl-lg" style="background:#1A1A1A">Bras / Cohorte</th>
+                                <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A">Distribuées</th>
+                                <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide rounded-tr-lg" style="background:#1A1A1A">Marquées</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @php $totalNetsDisplay = $byBrasCohortNets->sum('nets'); $totalMarkedDisplay = $byBrasCohortNets->sum('marked'); @endphp
+                            @foreach ($byBrasCohortNets as $bi => $b)
+                                <tr class="border-b border-gray-100">
+                                    <td class="px-3 py-2 font-bold text-gray-800">
+                                        <span class="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style="background:{{ $bi === 0 ? '#C41230' : '#374151' }}"></span>
+                                        {{ $b['bras'] }}
+                                    </td>
+                                    <td class="px-3 py-2 text-right font-bold text-gray-800">{{ $b['nets'] }}</td>
+                                    <td class="px-3 py-2 text-right font-bold text-gray-800">{{ $b['marked'] }}</td>
+                                </tr>
+                                @foreach ($b['cohorts'] as $c)
+                                <tr class="bg-gray-50 border-b border-gray-100">
+                                    <td class="px-3 py-2 pl-8 text-gray-500 text-xs">{{ $c['cohort'] }}</td>
+                                    <td class="px-3 py-2 text-right text-gray-500 text-xs">{{ $c['nets'] }}</td>
+                                    <td class="px-3 py-2 text-right text-gray-500 text-xs">{{ $c['marked'] }}</td>
+                                </tr>
+                                @endforeach
+                            @endforeach
+                            <tr style="background:#C41230">
+                                <td class="px-3 py-2 text-white font-bold text-xs uppercase">Total général</td>
+                                <td class="px-3 py-2 text-right text-white font-bold">{{ $totalNetsDisplay }}</td>
+                                <td class="px-3 py-2 text-right text-white font-bold">{{ $totalMarkedDisplay }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {{-- ─ Vue Détail (pivot : Village/Grappe × Cohortes) ─ --}}
+            <div id="nettab-detail" style="display:none">
+                <div class="overflow-x-auto">
+                    @php
+                        $colCount = $allCohorts->count() + 2; // label + cohorts + Total
+                        $grandByCohort = [];
+                        $grandTotal    = 0;
+                        $grandMarkedTot= 0;
+                        foreach ($allCohorts as $c) $grandByCohort[$c] = 0;
+                    @endphp
+                    <table class="w-full text-sm border-collapse">
+                        <thead>
+                            <tr>
+                                <th class="text-left px-3 py-2.5 text-white text-xs font-bold uppercase tracking-wide rounded-tl-lg"
+                                    style="background:#1A1A1A">Bras / Village / Grappe</th>
+                                @foreach ($allCohorts as $c)
+                                <th class="text-right px-3 py-2.5 text-white text-xs font-bold uppercase tracking-wide"
+                                    style="background:#1A1A1A">{{ $c }}</th>
+                                @endforeach
+                                <th class="text-right px-3 py-2.5 text-white text-xs font-bold uppercase tracking-wide rounded-tr-lg"
+                                    style="background:#1A1A1A">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach ($byBrasCohortDetail as $bi => $b)
+                            @php
+                                $grandTotal     += $b['total'];
+                                $grandMarkedTot += $b['marked'];
+                                foreach ($allCohorts as $c)
+                                    $grandByCohort[$c] = ($grandByCohort[$c] ?? 0) + ($b['by_cohort'][$c] ?? 0);
+                            @endphp
+                            {{-- ── Section bras ── --}}
+                            <tr>
+                                <td colspan="{{ $colCount }}"
+                                    class="px-3 py-2 text-center font-bold text-xs uppercase tracking-widest border-b border-gray-200"
+                                    style="background:#F1F5F9;color:#1A1A1A">
+                                    <span class="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle"
+                                          style="background:{{ $bi === 0 ? '#C41230' : '#374151' }}"></span>
                                     {{ $b['bras'] }}
                                 </td>
-                                <td class="px-3 py-2 text-right font-bold text-gray-800">{{ $b['nets'] }}</td>
                             </tr>
-                            @foreach ($b['cohorts'] as $c)
-                            <tr class="{{ $bi % 2 === 0 ? '' : 'bg-gray-50' }} border-b border-gray-100">
-                                <td class="px-3 py-2 pl-8 text-gray-500 text-xs">{{ $c['cohort'] }}</td>
-                                <td class="px-3 py-2 text-right text-gray-500 text-xs">{{ $c['nets'] }}</td>
+                            {{-- ── Lignes Village / Grappe ── --}}
+                            @foreach ($b['grappes'] as $gi => $g)
+                            <tr class="border-b border-gray-100 {{ $gi % 2 === 0 ? '' : 'bg-gray-50' }} hover:bg-red-50 transition-colors">
+                                <td class="px-3 py-2 text-gray-700 text-xs">{{ $g['label'] }}</td>
+                                @foreach ($allCohorts as $c)
+                                <td class="px-3 py-2 text-right text-gray-800 text-xs font-medium">
+                                    {{ $g['by_cohort'][$c] ?? 0 }}
+                                </td>
+                                @endforeach
+                                <td class="px-3 py-2 text-right text-xs font-bold text-gray-900">{{ $g['total'] }}</td>
                             </tr>
                             @endforeach
+                            {{-- ── Sous-total bras ── --}}
+                            <tr style="background:#374151">
+                                <td class="px-3 py-2 text-white text-xs font-bold">
+                                    Sous-total — {{ $b['bras'] }}
+                                </td>
+                                @foreach ($allCohorts as $c)
+                                <td class="px-3 py-2 text-right text-white text-xs font-bold">{{ $b['by_cohort'][$c] ?? 0 }}</td>
+                                @endforeach
+                                <td class="px-3 py-2 text-right text-white text-xs font-bold">{{ $b['total'] }}</td>
+                            </tr>
                         @endforeach
+                        {{-- ── Total général ── --}}
                         <tr style="background:#C41230">
-                            <td class="px-3 py-2 text-white font-bold text-xs uppercase">Total général</td>
-                            <td class="px-3 py-2 text-right text-white font-bold">{{ $totalNetsDisplay }}</td>
+                            <td class="px-3 py-2.5 text-white font-bold text-xs uppercase">Total général</td>
+                            @foreach ($allCohorts as $c)
+                            <td class="px-3 py-2.5 text-right text-white font-bold text-xs">{{ $grandByCohort[$c] ?? 0 }}</td>
+                            @endforeach
+                            <td class="px-3 py-2.5 text-right text-white font-bold">{{ $grandTotal }}</td>
                         </tr>
-                    </tbody>
-                </table>
+                        </tbody>
+                    </table>
+                    <p class="text-xs text-gray-400 mt-2">Valeurs = moustiquaires distribuées · Marquées (code saisi) : {{ $grandMarkedTot }} / {{ $grandTotal }}</p>
+                </div>
             </div>
         </div>
         @endif
@@ -1480,6 +1591,19 @@ function showTab(name, btn) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('tab-' + name).classList.add('active');
     btn.classList.add('active');
+}
+
+// ── Moustiquaires par bras/cohorte : onglets Résumé / Détail ──
+function showNetTab(name) {
+    ['resume', 'detail'].forEach(t => {
+        const panel = document.getElementById('nettab-' + t);
+        const btn   = document.getElementById('nettab-btn-' + t);
+        if (!panel || !btn) return;
+        const active = t === name;
+        panel.style.display = active ? '' : 'none';
+        btn.style.background = active ? '#1A1A1A' : '#fff';
+        btn.style.color      = active ? '#fff'    : '#6B7280';
+    });
 }
 
 // ── Pagination system ──────────────────────────────────────────────
