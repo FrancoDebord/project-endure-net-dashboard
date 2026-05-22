@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\GpsExportController;
 use App\Http\Controllers\QueriesController;
 use Illuminate\Support\Facades\Route;
 
@@ -28,4 +29,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/distribution/resume/pdf', [DashboardController::class, 'exportDistributionResumePdf'])->name('distribution.resume.pdf');
     Route::get('/rapport/pdf', [DashboardController::class, 'exportRapportPdf'])->name('rapport.pdf');
     Route::post('/performance/pdf', [DashboardController::class, 'exportPerformancePdf'])->name('performance.pdf');
+    Route::get('/gps-export',  [GpsExportController::class, 'index'])->name('gps.export');
+    Route::post('/gps-export', [GpsExportController::class, 'export'])->name('gps.export.download');
 });

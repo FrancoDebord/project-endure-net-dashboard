@@ -734,14 +734,18 @@ class DashboardController extends Controller
         ])->sortKeys()->values();
 
         $cohortByBras = $allHouseholds->groupBy('bras')->map(fn($g, $bras) => [
-            'label'     => self::BRAS_LABELS[$bras] ?? "Bras $bras",
-            'total'     => $g->count(),
-            'consented' => $g->where('consent_accepted', '1')->count(),
-            'cohorts'   => $g->groupBy('study_cohort')->map(fn($sg, $c) => [
-                'label'     => self::COHORT_LABELS[$c] ?? "Cohorte $c",
-                'total'     => $sg->count(),
-                'consented' => $sg->where('consent_accepted', '1')->count(),
-            ])->values(),
+            'label'   => self::BRAS_LABELS[$bras] ?? "Bras $bras",
+            // Counts restricted to households with a known cohort so the header total
+            // equals the sum of cohort rows and "consentis" numbers are consistent.
+            'total'     => $g->filter(fn($hh) => isset(self::COHORT_LABELS[$hh['study_cohort'] ?? '']))->count(),
+            'consented' => $g->filter(fn($hh) => isset(self::COHORT_LABELS[$hh['study_cohort'] ?? '']))->where('consent_accepted', '1')->count(),
+            'cohorts'   => $g->groupBy('study_cohort')
+                ->filter(fn($sg, $c) => isset(self::COHORT_LABELS[$c]))
+                ->map(fn($sg, $c) => [
+                    'label'     => self::COHORT_LABELS[$c],
+                    'total'     => $sg->count(),
+                    'consented' => $sg->where('consent_accepted', '1')->count(),
+                ])->values(),
         ])->values();
 
         $qb = collect($qbRaw)

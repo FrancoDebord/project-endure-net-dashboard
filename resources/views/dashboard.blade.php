@@ -137,6 +137,15 @@
                 </svg>
                 Queries
             </a>
+            <a href="{{ route('gps.export') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                GPS
+            </a>
             <form method="POST" action="{{ route('cache.clear') }}">
                 @csrf
                 <button type="submit"
@@ -325,7 +334,10 @@
                                       style="{{ $brasRow['label'] === 'PERMANET DUAL' ? 'color:var(--red)' : 'color:#374151' }}">
                                     {{ $brasRow['label'] }}
                                 </span>
-                                <span class="text-xs text-gray-500">{{ $brasRow['total'] }} ménages</span>
+                                <span class="text-xs text-gray-500">
+                                    <span class="font-semibold text-gray-700">{{ $brasRow['consented'] }}</span> consentis
+                                    <span class="text-gray-400">/ {{ $brasRow['total'] }}</span>
+                                </span>
                             </div>
                             <div class="divide-y divide-gray-50">
                                 @foreach ($brasRow['cohorts'] as $cohort)
@@ -337,8 +349,8 @@
                                             </span>
                                         </div>
                                         <div class="text-right flex items-center gap-3">
-                                            <span class="text-xs text-gray-400">{{ $cohort['consented'] }} consentis</span>
-                                            <span class="text-base font-bold text-gray-800">{{ $cohort['total'] }}</span>
+                                            <span class="text-xs text-gray-400">sur {{ $cohort['total'] }}</span>
+                                            <span class="text-base font-bold text-gray-800">{{ $cohort['consented'] }}</span>
                                         </div>
                                     </div>
                                 @endforeach
@@ -476,6 +488,12 @@
                                 <option value="{{ $dagOpt }}">{{ $dagOpt }}</option>
                             @endforeach
                         </select>
+                        <select id="filterConsent" onchange="filterHH()"
+                                class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
+                            <option value="">Tous les ménages</option>
+                            <option value="1">Consentis</option>
+                            <option value="0">Non consentis</option>
+                        </select>
                         <span id="hhCount" class="flex items-center text-xs text-gray-400 whitespace-nowrap px-2">
                             {{ $householdDetails->count() }} lignes
                         </span>
@@ -502,7 +520,7 @@
                             </thead>
                             <tbody class="divide-y divide-gray-50">
                                 @forelse ($householdDetails as $hh)
-                                    <tr class="hov-row transition-colors" data-bras="{{ $hh['bras'] }}" data-village="{{ $hh['village'] }}" data-cohort="{{ $hh['cohort'] }}" data-cluster="{{ $hh['cluster'] }}" data-dag="{{ $hh['dag'] }}">
+                                    <tr class="hov-row transition-colors" data-bras="{{ $hh['bras'] }}" data-village="{{ $hh['village'] }}" data-cohort="{{ $hh['cohort'] }}" data-cluster="{{ $hh['cluster'] }}" data-dag="{{ $hh['dag'] }}" data-consented="{{ $hh['consented'] ? '1' : '0' }}">
                                         <td class="py-2.5 px-3 font-mono text-xs">
                                             <span class="{{ $hh['id_valid'] ? 'text-gray-500' : 'text-red-500' }}">{{ $hh['id'] }}</span>
                                             @if (!$hh['id_valid'])
@@ -1685,15 +1703,17 @@ function filterHH() {
     const village = document.getElementById('filterHHVillage').value;
     const grappe  = document.getElementById('filterHHGrappe').value;
     const dag     = document.getElementById('filterHHDag').value;
+    const consent = document.getElementById('filterConsent').value;
     let count = 0;
     document.querySelectorAll('#hhTable tbody tr').forEach(row => {
         const d = row.dataset;
         const show = row.textContent.toLowerCase().includes(q)
-            && (!bras    || d.bras    === bras)
-            && (!coh     || d.cohort  === coh)
-            && (!village || d.village === village)
+            && (!bras    || d.bras      === bras)
+            && (!coh     || d.cohort    === coh)
+            && (!village || d.village   === village)
             && (!grappe  || (d.cluster || '').includes(grappe))
-            && (!dag     || d.dag     === dag);
+            && (!dag     || d.dag       === dag)
+            && (!consent || d.consented === consent);
         row._searchHidden = !show;
         if (show) count++;
     });

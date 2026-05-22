@@ -694,23 +694,36 @@ class QueriesController extends Controller
         foreach ($visits->where('consent_accepted', '1') as $hh) {
             $id = $hh['household_id'];
             $r  = $qb->get($id);
-            if (!$r || ($r['b_geo_latitude'] === '' && $r['b_geo_longitude'] === '')) {
-                $results[] = $this->q('Q-GPS-01', 'warning',
-                    'Coordonnées GPS manquantes',
-                    "Le ménage {$id} a consenti à l'étude mais aucune coordonnée GPS n'a été enregistrée dans le questionnaire baseline. La géolocalisation est nécessaire pour la cartographie des ménages.",
-                    "Effectuer une nouvelle visite pour collecter les coordonnées GPS, ou vérifier que le questionnaire baseline a bien été soumis pour ce ménage.",
-                    [
-                        'event'        => 'baseline_et_distri_arm_1',
-                        'form'         => 'questionnaire_base',
-                        'household_id' => $id,
-                        'tablet'       => $hh['a_tablette_id'] ?? '',
-                        'initials'     => $hh['a_initiales_id'] ?? '',
-                        'field'        => 'b_geo_latitude / b_geo_longitude',
-                        'value'        => 'vide',
-                        'extra'        => 'Date visite : ' . ($r['b_date_visit'] ?? $hh['a_date_visite_id'] ?? '—'),
-                    ]
-                );
-            }
+            if (!$r) continue; // already covered by Q-BASE-01 (questionnaire absent)
+
+            $latEmpty = $r['b_geo_latitude']  === '';
+            $lngEmpty = $r['b_geo_longitude'] === '';
+            if (!$latEmpty && !$lngEmpty) continue;
+
+            $partial = !$latEmpty || !$lngEmpty; // one coord present, the other missing
+            $value   = $partial
+                ? ($latEmpty ? 'b_geo_latitude vide  |  b_geo_longitude = ' . $r['b_geo_longitude'] : 'b_geo_latitude = ' . $r['b_geo_latitude'] . '  |  b_geo_longitude vide')
+                : 'vide';
+            $title = $partial ? 'Coordonnées GPS incomplètes' : 'Coordonnées GPS manquantes';
+            $description = $partial
+                ? "Le ménage {$id} a consenti à l'étude mais une seule coordonnée GPS est renseignée dans le questionnaire baseline (l'autre est vide). Les deux champs sont obligatoires pour géolocaliser correctement le ménage."
+                : "Le ménage {$id} a consenti à l'étude mais aucune coordonnée GPS n'a été enregistrée dans le questionnaire baseline. La géolocalisation est indispensable pour la cartographie et le suivi géographique de l'étude.";
+
+            $results[] = $this->q('Q-GPS-01', 'critical',
+                $title,
+                $description,
+                "Ouvrir le questionnaire baseline pour ce ménage dans REDCap et saisir les coordonnées GPS (b_geo_latitude et b_geo_longitude) en activant le module de géolocalisation sur place.",
+                [
+                    'event'        => 'baseline_et_distri_arm_1',
+                    'form'         => 'questionnaire_base',
+                    'household_id' => $id,
+                    'tablet'       => $hh['a_tablette_id'] ?? '',
+                    'initials'     => $hh['a_initiales_id'] ?? '',
+                    'field'        => 'b_geo_latitude / b_geo_longitude',
+                    'value'        => $value,
+                    'extra'        => 'Date visite : ' . ($r['b_date_visit'] ?? $hh['a_date_visite_id'] ?? '—'),
+                ]
+            );
         }
         return $results;
     }
