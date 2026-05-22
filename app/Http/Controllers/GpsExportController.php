@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\RedCapService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use ZipArchive;
 
 class GpsExportController extends Controller
 {
@@ -103,24 +104,39 @@ class GpsExportController extends Controller
 
         $byCluster = $households->groupBy('cluster')->sortKeys();
 
-        // Build a descriptive label for the filename
+        // Single cluster → return one GPX file directly
         if ($byCluster->count() === 1) {
-            $clusterKey  = $byCluster->keys()->first();
-            $label       = self::CLUSTER_LABELS[$clusterKey] ?? "Grappe $clusterKey";
-            $filename    = 'ENDURE-Net_' . (self::CLUSTER_FILENAMES[$clusterKey] ?? "Grappe-$clusterKey") . '_' . now()->format('Y-m-d') . '.gpx';
-        } else {
-            $label    = 'ENDURE-Net — ' . $byCluster->count() . ' grappes';
-            $filename = 'ENDURE-Net_GPS_' . now()->format('Y-m-d') . '.gpx';
+            $clusterKey = $byCluster->keys()->first();
+            $label      = self::CLUSTER_LABELS[$clusterKey] ?? "Grappe $clusterKey";
+            $gpx        = $this->buildGpx($byCluster->first(), $label);
+            $filename   = 'ENDURE-Net_' . (self::CLUSTER_FILENAMES[$clusterKey] ?? "Grappe-$clusterKey") . '_' . now()->format('Y-m-d') . '.gpx';
+
+            return response($gpx, 200, [
+                'Content-Type'        => 'application/gpx+xml; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            ]);
         }
 
-        // Always one GPX file — no ZIP dependency required.
-        // The cluster label is included in each waypoint's description so OsmAnd
-        // can distinguish points by grappe without needing separate files.
-        $gpx = $this->buildGpx($households, $label);
+        // Multiple clusters → ZIP containing one GPX per cluster
+        $tmpFile = tempnam(sys_get_temp_dir(), 'endure_gps_');
+        $zip     = new ZipArchive();
+        $zip->open($tmpFile, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
-        return response($gpx, 200, [
-            'Content-Type'        => 'application/gpx+xml; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        foreach ($byCluster as $clusterKey => $points) {
+            $label    = self::CLUSTER_LABELS[$clusterKey] ?? "Grappe $clusterKey";
+            $gpx      = $this->buildGpx($points, $label);
+            $filename = 'ENDURE-Net_' . (self::CLUSTER_FILENAMES[$clusterKey] ?? "Grappe-$clusterKey") . '.gpx';
+            $zip->addFromString($filename, $gpx);
+        }
+        $zip->close();
+
+        $content     = file_get_contents($tmpFile);
+        unlink($tmpFile);
+        $zipFilename = 'ENDURE-Net_GPS_' . now()->format('Y-m-d') . '.zip';
+
+        return response($content, 200, [
+            'Content-Type'        => 'application/zip',
+            'Content-Disposition' => 'attachment; filename="' . $zipFilename . '"',
         ]);
     }
 
