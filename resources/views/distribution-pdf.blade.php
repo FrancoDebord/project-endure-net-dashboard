@@ -94,8 +94,9 @@ table tbody tr:nth-child(even) td { background: #F8FAFC; }
 <table>
     <thead>
         <tr>
-            <th style="width:42%">Code Ménage</th>
-            <th style="width:38%">Code Moustiquaire</th>
+            <th style="width:36%">Code Ménage</th>
+            <th style="width:12%" class="num">Taille</th>
+            <th style="width:32%">Code Moustiquaire</th>
             <th class="num" style="width:20%">Total</th>
         </tr>
     </thead>
@@ -104,13 +105,23 @@ table tbody tr:nth-child(even) td { background: #F8FAFC; }
             @foreach ($hh['nets'] as $ni => $net)
             <tr class="{{ $ni === 0 ? 'row-first' : '' }}">
                 <td>{{ $ni === 0 ? $hh['household_id'] : '' }}</td>
+                <td class="num">{{ $ni === 0 ? ($hh['members'] ?: '—') : '' }}</td>
                 <td>{{ $net }}</td>
-                <td class="num">{{ $ni === 0 ? $hh['total'] : '' }}</td>
+                <td class="num">
+                    @if ($ni === 0)
+                        {{ $hh['total'] }}
+                        @if ($hh['net_status'] === 'low')
+                            <span style="color:#EA580C;font-weight:bold"> ↓ sous-doté</span>
+                        @elseif ($hh['net_status'] === 'high')
+                            <span style="color:#2563EB;font-weight:bold"> ↑ sur-doté</span>
+                        @endif
+                    @endif
+                </td>
             </tr>
             @endforeach
         @endforeach
         <tr class="row-total">
-            <td colspan="2">Total Tablette {{ $tabletGroup['tablet'] }}</td>
+            <td colspan="3">Total Tablette {{ $tabletGroup['tablet'] }}</td>
             <td class="num">{{ $tabletGroup['total'] }}</td>
         </tr>
     </tbody>

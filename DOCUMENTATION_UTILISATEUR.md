@@ -1,0 +1,435 @@
+# Documentation utilisateur — ENDURE-Net Dashboard
+
+**Version :** 1.0 · **Date :** Mai 2026  
+**Projet :** AIRID / ENDURE-Net · Suivi MILDA, données REDCap
+
+---
+
+## Table des matières
+
+1. [Vue d'ensemble](#1-vue-densemble)
+2. [Connexion et authentification](#2-connexion-et-authentification)
+3. [Interface principale — Navigation](#3-interface-principale--navigation)
+4. [Tableau de bord — Onglet Baseline & Distribution](#4-tableau-de-bord--onglet-baseline--distribution)
+5. [Tableau de bord — Onglet Acceptabilité](#5-tableau-de-bord--onglet-acceptabilité)
+6. [Tableau de bord — Onglet Événements indésirables](#6-tableau-de-bord--onglet-événements-indésirables)
+7. [Tableau de bord — Onglet Suivi](#7-tableau-de-bord--onglet-suivi)
+8. [Section Distribution des moustiquaires par binôme](#8-section-distribution-des-moustiquaires-par-binôme)
+9. [Module Queries — Contrôle qualité des données](#9-module-queries--contrôle-qualité-des-données)
+10. [Module Export GPS](#10-module-export-gps)
+11. [Exports PDF](#11-exports-pdf)
+12. [Actualisation du cache](#12-actualisation-du-cache)
+
+---
+
+## 1. Vue d'ensemble
+
+Le tableau de bord ENDURE-Net est une application web de suivi des données de terrain pour l'étude AIRID. Il agrège en temps réel les données collectées via REDCap (projet 46) et fournit :
+
+- **Statistiques de terrain** : visites, consentements, cohortes A/B, moustiquaires distribuées
+- **Contrôle qualité** : détection automatique d'incohérences et de données manquantes
+- **Export GPS** : génération de fichiers GPX pour la navigation terrain (OsmAnd)
+- **Rapports PDF** : impression de tableaux de distribution, rapports de performance
+
+**Zones géographiques couvertes :**
+
+| Village | Grappes |
+|---|---|
+| Djigbé | 1, 2 |
+| Gbônou | 3, 4, 5 |
+| Miniffi | 6, 7, 8 |
+
+**Bras de l'étude :**
+- **Bras 1 (PERMANET DUAL)** — Grappes 1, 5, 7, 8
+- **Bras 2 (INTERCEPTOR G2)** — Grappes 2, 3, 4, 6
+
+---
+
+## 2. Connexion et authentification
+
+### 2.1 Connexion par email et mot de passe
+
+1. Accéder à l'URL de l'application.
+2. Renseigner votre adresse e-mail institutionnelle et votre mot de passe.
+3. Cocher **"Se souvenir de moi"** pour rester connecté entre les sessions.
+4. Cliquer sur **"Se connecter"**.
+
+> En cas d'erreur, un message s'affiche sous le champ e-mail. Vérifier que votre compte est actif auprès de l'administrateur.
+
+### 2.2 Connexion via Microsoft 365
+
+Cliquer sur le bouton **"Se connecter avec Microsoft 365"** sous le formulaire.  
+Vous serez redirigé vers la page de connexion Microsoft de votre organisation.
+
+- Seuls les comptes dont l'adresse e-mail correspond à un compte **actif** dans la base AIRID sont autorisés.
+- Si votre compte n'est pas reconnu, contactez l'administrateur pour l'activation.
+
+### 2.3 Mot de passe oublié
+
+1. Cliquer sur **"Mot de passe oublié ?"** sous le formulaire.
+2. Saisir votre adresse e-mail institutionnelle.
+3. Un lien de réinitialisation vous sera envoyé par e-mail.
+4. Cliquer sur le lien reçu et définir un nouveau mot de passe (minimum 8 caractères).
+
+### 2.4 Déconnexion
+
+Cliquer sur le bouton **"Déconnexion"** dans le coin supérieur droit de la bannière.
+
+---
+
+## 3. Interface principale — Navigation
+
+### 3.1 Bannière supérieure
+
+La bannière affiche :
+- Le logo et le nom de l'application **ENDURE-Net**
+- Un lien **"Queries"** vers le module de contrôle qualité
+- Un lien **"GPS"** vers le module d'export GPS
+- Un bouton **"Actualiser"** pour vider le cache et recharger les données REDCap
+- Le **nom de l'utilisateur connecté** (initiales + prénom nom)
+- Le bouton **"Déconnexion"**
+
+### 3.2 Onglets du tableau de bord
+
+Le tableau de bord comporte 5 onglets :
+
+| Onglet | Contenu |
+|---|---|
+| **Baseline & Distribution** | Statistiques de visites, consentements, cohortes, moustiquaires |
+| **Acceptabilité** | Données d'acceptabilité utilisateur des MILDA |
+| **Événements indésirables** | Suivi des effets indésirables signalés |
+| **Suivi** | Données des visites de suivi |
+| **Distribution** *(section en bas)* | Tableau détaillé par binôme/tablette |
+
+Cliquer sur le nom d'un onglet pour l'afficher. L'onglet actif est souligné en rouge.
+
+### 3.3 Filtres globaux
+
+En haut du tableau de bord, des filtres s'appliquent à l'ensemble des onglets :
+
+- **Village** : Djigbé / Gbônou / Miniffi / Tous
+- **Grappe** : 1 à 8 (filtrage par cluster)
+- **Bras** : Bras 1 (PERMANET DUAL) / Bras 2 (INTERCEPTOR G2) / Tous
+
+> Les filtres Village et Bras sont liés : sélectionner un village filtre automatiquement les grappes correspondantes.
+
+---
+
+## 4. Tableau de bord — Onglet Baseline & Distribution
+
+### 4.1 Cartes KPI (indicateurs clés)
+
+Cinq cartes s'affichent en haut :
+
+| Carte | Description |
+|---|---|
+| **Ménages visités** | Nombre total de ménages ayant reçu au moins une visite |
+| **Consentements** | Nombre et pourcentage de ménages ayant donné leur consentement |
+| **Cohorte A** | Ménages enrôlés en cohorte A |
+| **Cohorte B** | Ménages enrôlés en cohorte B |
+| **Moustiquaires** | Total de MILDA distribuées |
+
+### 4.2 Tableau Cohortes par bras
+
+Ce tableau récapitule la répartition des ménages par bras et par cohorte.
+
+- La colonne de gauche liste les bras (Bras 1 et Bras 2).
+- Pour chaque bras : nombre de ménages **consentis** (en gras) sur le total visité.
+- Les lignes suivantes détaillent la répartition par cohorte (A et B uniquement).
+
+### 4.3 Tableau de détail des ménages
+
+Le tableau liste tous les ménages avec :
+
+| Colonne | Description |
+|---|---|
+| Code Ménage | Identifiant unique du ménage |
+| Village / Grappe | Localisation |
+| Bras | Bras de l'étude |
+| Tablette | Identifiant de la tablette de collecte |
+| Cohorte | A ou B |
+| Consentement | Statut (Accepté / Non accepté) |
+| Taille | Nombre de membres du ménage |
+| Moustiquaires | Nombre de MILDA distribuées |
+
+#### Filtres du tableau de détail
+
+Une barre de filtre au-dessus du tableau permet de restreindre l'affichage :
+
+- **Recherche** : recherche libre dans le code ménage
+- **Village** : filtre par village
+- **Grappe** : filtre par numéro de grappe
+- **Bras** : filtre par bras
+- **Cohorte** : filtre par cohorte (A / B)
+- **Consentement** : filtre les ménages ayant consenti / non consentis
+- **Tablette** : filtre par identifiant de tablette
+
+### 4.4 Carte interactive (Leaflet)
+
+Une carte géographique affiche les ménages géolocalisés sous forme de points colorés :
+
+- **Points rouges** : ménages Bras 1 (PERMANET DUAL)
+- **Points bleus** : ménages Bras 2 (INTERCEPTOR G2)
+
+Cliquer sur un point pour afficher le code ménage et ses informations de base.
+
+Les couches de fond disponibles (en haut à gauche de la carte) :
+- OpenStreetMap (standard)
+- Satellite (imagerie aérienne)
+
+---
+
+## 5. Tableau de bord — Onglet Acceptabilité
+
+Cet onglet présente les données du questionnaire d'acceptabilité utilisateur (UA) des MILDA :
+
+- **Taux d'utilisation** : proportion de ménages déclarant avoir utilisé les moustiquaires
+- **Raisons de non-utilisation** : graphique ou tableau des motifs signalés
+- **Satisfaction** : indicateurs de satisfaction par type de moustiquaire
+
+> Les données sont calculées uniquement pour les ménages ayant retourné le formulaire UA.
+
+---
+
+## 6. Tableau de bord — Onglet Événements indésirables
+
+Cet onglet regroupe les données du formulaire Adverse Events (AE) :
+
+- Liste des symptômes signalés après utilisation des MILDA
+- Répartition par type de symptôme et par bras
+- Taux de signalement par rapport aux ménages exposés
+
+---
+
+## 7. Tableau de bord — Onglet Suivi
+
+Données issues des visites de suivi post-distribution :
+
+- **Présence des moustiquaires** : vérification que les MILDA sont toujours au domicile
+- **Utilisation** : déclaration d'utilisation lors de la dernière nuit
+- **Nombre de nuits d'utilisation** : statistiques d'usage
+- **Comparaison Bras 1 / Bras 2**
+
+---
+
+## 8. Section Distribution des moustiquaires par binôme
+
+Cette section, accessible en bas du tableau de bord (après les onglets), présente le détail des moustiquaires distribuées par binôme de terrain (tablette).
+
+### 8.1 Filtres de la section Distribution
+
+- **Date de début / Date de fin** : période de distribution
+- **Tablettes** : sélection des binômes à afficher (cases à cocher)
+
+Cliquer sur **"Appliquer"** pour filtrer.
+
+### 8.2 Tableau par tablette
+
+Chaque tablette est présentée dans un bloc repliable (▼) :
+
+- Cliquer sur l'en-tête pour **replier / déplier** le tableau de la tablette.
+- L'en-tête affiche : Tablette · ménages visités · ménages enrôlés · total moustiquaires.
+
+Le tableau de chaque tablette contient :
+
+| Colonne | Description |
+|---|---|
+| Code Ménage | Identifiant du ménage |
+| Taille | Nombre de membres du ménage |
+| Date visite | Date de la visite de distribution |
+| Cohorte | A ou B |
+| Code Moustiquaire | Code-barres de chaque MILDA |
+| Type | Type de moustiquaire (PERMANET DUAL / INTERCEPTOR G2) |
+| Total | Nombre de MILDA distribuées au ménage |
+
+La ligne de total en rouge en bas de chaque bloc indique le total de MILDA pour la tablette.
+
+### 8.3 Export PDF — Distribution par tablette
+
+Le bouton **"PDF"** en haut de la section génère un fichier PDF de la distribution filtrée. Le PDF inclut la colonne **Taille** pour chaque ménage.
+
+---
+
+## 9. Module Queries — Contrôle qualité des données
+
+Accessible via le lien **"Queries"** dans la bannière, ou l'URL `/queries`.
+
+### 9.1 Vue d'ensemble
+
+Ce module détecte automatiquement les incohérences et données manquantes dans les formulaires REDCap. Il génère une liste de **queries** (signalements) classées par sévérité.
+
+### 9.2 Indicateurs KPI
+
+Quatre cartes affichent les comptages par sévérité :
+
+| Sévérité | Couleur | Signification |
+|---|---|---|
+| **Critique** | Rouge | Donnée manquante ou erreur bloquante (GPS absent, consentement non renseigné) |
+| **Avertissement** | Orange | Incohérence probable nécessitant vérification |
+| **Info** | Bleu | Anomalie mineure ou point d'attention |
+| **Total** | Gris | Somme de toutes les queries |
+
+### 9.3 Filtres
+
+- **Sévérité** : Critique / Avertissement / Info
+- **Formulaire** : Baseline / Membres / Moustiquaires / Adverse Events / Acceptabilité / Suivi
+- **Tablette** : filtre par identifiant de tablette
+- **Initiales** : filtre par initiales de l'agent de terrain
+- **Codes query** : cases à cocher par code pour afficher/masquer des types spécifiques
+
+### 9.4 Tableau des queries
+
+Chaque ligne représente une query avec :
+
+| Champ | Description |
+|---|---|
+| Code | Identifiant de la règle (ex. Q-GPS-01) |
+| Sévérité | Critique / Avertissement / Info |
+| Ménage | Code du ménage concerné |
+| Formulaire | Formulaire REDCap concerné |
+| Tablette | Tablette de collecte |
+| Titre | Description courte du problème |
+| Détail | Explication et valeur observée |
+| Suggestion | Action corrective recommandée |
+
+### 9.5 Liste des codes query
+
+| Code | Sévérité | Description |
+|---|---|---|
+| Q-VIS-01 | Avertissement | Séquence de visites inattendue |
+| Q-ID-01 | Critique | Format de l'identifiant ménage invalide |
+| Q-ID-02 | Avertissement | Incohérence entre ID ménage et village |
+| Q-ID-03 | Avertissement | Incohérence entre ID ménage et grappe |
+| Q-ID-04 | Avertissement | Incohérence entre ID ménage et bras |
+| Q-ID-05 | Avertissement | Incohérence entre ID ménage et tablette |
+| Q-ID-06 | Avertissement | Doublon d'identifiant ménage |
+| Q-BASE-01 | Critique | Champs obligatoires manquants au baseline |
+| Q-CNS-01 | Avertissement | Statut de consentement non renseigné |
+| Q-GPS-01 | Critique | Coordonnées GPS absentes ou partielles |
+| Q-GPS-02 | Avertissement | GPS hors zone attendue |
+| Q-SLP-01 | Avertissement | Incohérence espaces de couchage / pièces |
+| Q-SLP-02 | Info | Nombre de pièces suspect |
+| Q-EDU-01 | Info | Logique de saut éducation non respectée |
+| Q-MBR-01 | Avertissement | Nombre de membres déclaré incohérent |
+| Q-MBR-02 | Info | Écart entre membres formulaire et membres individuels |
+| Q-NET-01 | Critique | Code moustiquaire manquant |
+| Q-NET-02 | Avertissement | Nombre de MILDA incohérent avec la taille du ménage |
+| Q-NET-03 | Avertissement | Code moustiquaire en double |
+| Q-NET-04 | Info | Type de MILDA ne correspond pas au bras |
+| Q-AE-01 | Avertissement | Symptôme coché mais intensité non renseignée |
+| Q-AE-02 | Avertissement | Contradiction dans les données d'événement indésirable |
+| Q-AE-03 | Info | Symptôme signalé sans lien avec les MILDA |
+| Q-UA-01 | Avertissement | Contradiction dans les données d'acceptabilité |
+| Q-UA-02 | Info | Réponse d'utilisation incohérente |
+| Q-FW-01 | Avertissement | Moustiquaire absente lors du suivi |
+| Q-FW-02 | Avertissement | Contradiction présence / utilisation au suivi |
+| Q-FW-03 | Info | Nombre de nuits d'utilisation suspect |
+
+### 9.6 Export PDF des queries
+
+Le bouton **"Exporter PDF"** génère un fichier PDF des queries actuellement filtrées, avec tous les détails et suggestions.
+
+### 9.7 Actualisation des queries
+
+Le bouton **"Actualiser"** recharge les données depuis REDCap et recalcule toutes les queries.
+
+---
+
+## 10. Module Export GPS
+
+Accessible via le lien **"GPS"** dans la bannière, ou l'URL `/gps-export`.
+
+### 10.1 Présentation
+
+Ce module génère des fichiers **GPX** (format standard de navigation GPS) contenant les coordonnées des ménages sélectionnés. Ces fichiers sont destinés à être importés dans **OsmAnd** pour faciliter la navigation terrain lors des visites de suivi.
+
+### 10.2 Informations incluses dans chaque point GPS
+
+Pour chaque ménage exporté, le fichier GPX contient :
+- Code ménage (identifiant)
+- Nom du chef de ménage
+- Cohorte (A ou B)
+- Village
+- Adresse / repère
+
+### 10.3 Utilisation
+
+#### Étape 1 — Sélectionner les grappes
+
+Les grappes sont organisées par village :
+- **Djigbé** : Grappes 1, 2
+- **Gbônou** : Grappes 3, 4, 5
+- **Miniffi** : Grappes 6, 7, 8
+
+Cocher les grappes souhaitées. Les boutons **"Tout cocher"** / **"Tout décocher"** permettent une sélection rapide.
+
+#### Étape 2 — Filtrer par cohorte (optionnel)
+
+- **Toutes** : exporte les cohortes A et B
+- **Cohorte A** : uniquement les ménages en cohorte A
+- **Cohorte B** : uniquement les ménages en cohorte B
+
+#### Étape 3 — Filtrer par consentement
+
+- **Consentis uniquement** *(recommandé)* : n'exporte que les ménages ayant donné leur consentement
+- **Tous avec GPS valide** : exporte tous les ménages avec des coordonnées GPS, qu'ils aient consenti ou non
+
+#### Étape 4 — Télécharger
+
+Cliquer sur **"Télécharger GPX"**.
+
+- Si **une seule grappe** est sélectionnée : téléchargement d'un fichier `.gpx` unique.
+- Si **plusieurs grappes** sont sélectionnées : téléchargement d'une archive `.zip` contenant un fichier `.gpx` par grappe.
+
+### 10.4 Importer dans OsmAnd
+
+1. Transférer le(s) fichier(s) `.gpx` sur le téléphone (via câble, email, ou cloud).
+2. Dans OsmAnd : **Menu → Mes lieux → Traces → Importer**.
+3. Sélectionner le fichier `.gpx`.
+4. Les ménages apparaissent comme waypoints sur la carte avec leurs informations.
+
+---
+
+## 11. Exports PDF
+
+Plusieurs exports PDF sont disponibles depuis le tableau de bord.
+
+### 11.1 Rapport général
+
+Bouton **"Rapport PDF"** dans l'onglet Baseline :  
+Génère un rapport de synthèse avec les statistiques globales par bras, village et cohorte.
+
+### 11.2 Distribution par tablette
+
+Bouton **"PDF"** dans la section Distribution :  
+Génère le tableau de distribution de la sélection courante (période + tablettes filtrées), avec :
+- Code ménage, Taille, Date visite, Cohorte
+- Codes moustiquaires
+- Totaux par tablette
+
+### 11.3 Distribution — Résumé
+
+Bouton **"Résumé PDF"** dans la section Distribution :  
+Version condensée sans le détail des codes moustiquaires, une ligne par ménage.
+
+### 11.4 Performance
+
+Bouton **"Performance PDF"** dans l'onglet correspondant :  
+Graphiques et tableaux de performance par agent de terrain / tablette.
+
+---
+
+## 12. Actualisation du cache
+
+Les données affichées proviennent d'un cache local (durée : 30 minutes) pour optimiser les performances.
+
+Pour forcer le rechargement depuis REDCap :
+1. Cliquer sur le bouton **"Actualiser"** dans la bannière.
+2. Le cache est vidé et les données sont rechargées immédiatement.
+3. Un indicateur visuel confirme la réactualisation.
+
+> **Note :** l'actualisation peut prendre quelques secondes selon le volume de données.
+
+---
+
+*Documentation générée pour AIRID — ENDURE-Net · Mai 2026*

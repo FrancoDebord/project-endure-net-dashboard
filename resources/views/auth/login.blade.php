@@ -82,6 +82,26 @@
                     Se connecter
                 </button>
             </form>
+
+            {{-- Séparateur --}}
+            <div class="flex items-center gap-3 my-5">
+                <div class="flex-1 h-px bg-gray-200"></div>
+                <span class="text-xs text-gray-400 font-medium">ou</span>
+                <div class="flex-1 h-px bg-gray-200"></div>
+            </div>
+
+            {{-- Bouton Microsoft 365 --}}
+            <a href="{{ route('auth.microsoft') }}"
+               class="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 transition text-sm font-semibold text-gray-700 shadow-sm">
+                {{-- Logo Microsoft --}}
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23 23" class="w-5 h-5 flex-shrink-0">
+                    <rect x="1"  y="1"  width="10" height="10" fill="#F25022"/>
+                    <rect x="12" y="1"  width="10" height="10" fill="#7FBA00"/>
+                    <rect x="1"  y="12" width="10" height="10" fill="#00A4EF"/>
+                    <rect x="12" y="12" width="10" height="10" fill="#FFB900"/>
+                </svg>
+                Se connecter avec Microsoft 365
+            </a>
         </div>
 
         <p class="text-center text-xs text-gray-400 mt-6">

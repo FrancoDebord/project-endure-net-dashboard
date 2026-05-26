@@ -99,6 +99,16 @@ class DashboardController extends Controller
         return self::CLUSTER_FROM_ID[$p['village']][$p['grappe']] ?? '';
     }
 
+    private static function netStatus(int $total, int $members): string
+    {
+        if ($members <= 0) return 'unknown';
+        $min = (int) ceil($members / 3);
+        $max = min(5, (int) ceil($members / 2));
+        if ($total < $min) return 'low';
+        if ($total > $max) return 'high';
+        return 'ok';
+    }
+
     private const EVENTS = [
         'baseline' => ['key' => 'baseline', 'label' => 'Baseline & Distribution', 'icon' => '📋', 'event' => 'baseline_et_distri_arm_1'],
         'ua'       => ['key' => 'ua',       'label' => 'User Acceptability',      'icon' => '✅', 'event' => 'user_acceptability_arm_1'],
@@ -396,6 +406,7 @@ class DashboardController extends Controller
         $idRaw       = $this->redcap->getIdentificationData();
         $qbRaw       = $this->redcap->getBaselineQuestionnaireData();
         $studyNetRaw = $this->redcap->getStudyNetData();
+        $memberRaw   = $this->redcap->getMemberData();
 
         $qbByHh = collect($qbRaw)
             ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
@@ -410,6 +421,14 @@ class DashboardController extends Controller
             })
             ->where('consent_accepted', '1')
             ->pluck('household_id')->flip();
+
+        $membersByHh = collect($memberRaw)
+            ->filter(fn($r) =>
+                $r['household_id'] !== '' &&
+                ($r['redcap_repeat_instrument'] ?? '') === 'section_1_membres_du_mnage' &&
+                $r['redcap_repeat_instance'] !== ''
+            )
+            ->groupBy('household_id')->map->count();
 
         $visitDataByHh = collect($visiteRaw)
             ->filter(fn($r) => $r['household_id'] !== '')
@@ -457,21 +476,34 @@ class DashboardController extends Controller
         $netsByTablet = $nets
             ->filter(fn($r) => $r['tablette'] !== '')
             ->groupBy('tablette')->sortKeys()
-            ->map(fn($tNets, $tablet) => [
-                'tablet'     => $tablet,
-                'visited'    => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
-                'consented'  => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
-                'households' => $tNets->groupBy('household_id')->sortKeys()
-                    ->map(fn($hhNets, $hhId) => [
-                        'household_id' => $hhId,
-                        'date_visit'   => $hhNets->first()['date_visit'],
-                        'nets'         => $hhNets->pluck('net_code')->values(),
-                        'total'        => $hhNets->count(),
-                        'bras'         => $hhNets->first()['bras'],
-                        'cohort'       => $hhNets->first()['cohort'],
-                    ])->values(),
-                'total' => $tNets->count(),
-            ])->values();
+            ->map(function ($tNets, $tablet) use ($visitStatsByTablet, $membersByHh) {
+                $households = $tNets->groupBy('household_id')->sortKeys()
+                    ->map(function ($hhNets, $hhId) use ($membersByHh) {
+                        $members = $membersByHh->get($hhId, 0);
+                        return [
+                            'household_id' => $hhId,
+                            'date_visit'   => $hhNets->first()['date_visit'],
+                            'nets'         => $hhNets->pluck('net_code')->values(),
+                            'total'        => $hhNets->count(),
+                            'bras'         => $hhNets->first()['bras'],
+                            'cohort'       => $hhNets->first()['cohort'],
+                            'members'      => $members,
+                            'net_min'      => $members > 0 ? (int) ceil($members / 3) : 0,
+                            'net_max'      => $members > 0 ? min(5, (int) ceil($members / 2)) : 5,
+                            'net_status'   => self::netStatus($hhNets->count(), $members),
+                        ];
+                    })->values();
+                return [
+                    'tablet'    => $tablet,
+                    'visited'   => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
+                    'consented' => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
+                    'households'=> $households,
+                    'total'     => $tNets->count(),
+                    'net_low'   => $households->where('net_status', 'low')->count(),
+                    'net_high'  => $households->where('net_status', 'high')->count(),
+                    'net_ok'    => $households->where('net_status', 'ok')->count(),
+                ];
+            })->values();
 
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('distribution-pdf', compact(
             'netsByTablet', 'dateFrom', 'dateTo', 'tablets'
@@ -856,21 +888,34 @@ class DashboardController extends Controller
         $netsByTablet = $studyNetsDetail
             ->filter(fn($r) => $r['tablette'] !== '')
             ->groupBy('tablette')->sortKeys()
-            ->map(fn($tNets, $tablet) => [
-                'tablet'     => $tablet,
-                'visited'    => $visitsByTablet->get($tablet, collect())->count(),
-                'consented'  => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
-                'households' => $tNets->groupBy('household_id')->sortKeys()
-                    ->map(fn($hhNets, $hhId) => [
-                        'household_id' => $hhId,
-                        'date_visit'   => $hhNets->first()['date_visit'],
-                        'nets'         => $hhNets->pluck('net_code')->values(),
-                        'total'        => $hhNets->count(),
-                        'bras'         => $hhNets->first()['bras'],
-                        'cohort'       => $hhNets->first()['cohort'],
-                    ])->values(),
-                'total' => $tNets->count(),
-            ])->values();
+            ->map(function ($tNets, $tablet) use ($visitsByTablet, $membersByHh) {
+                $households = $tNets->groupBy('household_id')->sortKeys()
+                    ->map(function ($hhNets, $hhId) use ($membersByHh) {
+                        $members = $membersByHh->get($hhId, 0);
+                        return [
+                            'household_id' => $hhId,
+                            'date_visit'   => $hhNets->first()['date_visit'],
+                            'nets'         => $hhNets->pluck('net_code')->values(),
+                            'total'        => $hhNets->count(),
+                            'bras'         => $hhNets->first()['bras'],
+                            'cohort'       => $hhNets->first()['cohort'],
+                            'members'      => $members,
+                            'net_min'      => $members > 0 ? (int) ceil($members / 3) : 0,
+                            'net_max'      => $members > 0 ? min(5, (int) ceil($members / 2)) : 5,
+                            'net_status'   => self::netStatus($hhNets->count(), $members),
+                        ];
+                    })->values();
+                return [
+                    'tablet'    => $tablet,
+                    'visited'   => $visitsByTablet->get($tablet, collect())->count(),
+                    'consented' => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
+                    'households'=> $households,
+                    'total'     => $tNets->count(),
+                    'net_low'   => $households->where('net_status', 'low')->count(),
+                    'net_high'  => $households->where('net_status', 'high')->count(),
+                    'net_ok'    => $households->where('net_status', 'ok')->count(),
+                ];
+            })->values();
 
         $householdDetails = $allHouseholds->map(function ($hh) use ($qb, $membersByHh, $oldNetsByHh, $studyNetsByHh, $visitDataByHh) {
             $id         = $hh['household_id'];

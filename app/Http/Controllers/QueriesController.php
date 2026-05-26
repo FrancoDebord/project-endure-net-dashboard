@@ -229,6 +229,7 @@ class QueriesController extends Controller
             ->merge($this->checkEducationSkipLogic($qb, $visits))
             ->merge($this->checkMembersMissing($visits, $memberRaw))
             ->merge($this->checkMembersCountMismatch($visits, $memberRaw))
+            ->merge($this->checkAgeMonthsOverflow($visits, $memberRaw))
             ->merge($this->checkOldNetsCountMismatch($visits, $oldNetRaw))
             ->merge($this->checkStudyNetsCountMismatch($visits, $studyNetRaw, $form4aRaw))
             ->merge($this->checkStudyNetNoCode($studyNetRaw, $visits))
@@ -965,6 +966,48 @@ class QueriesController extends Controller
                     ]
                 );
             }
+        }
+        return $results;
+    }
+
+    private function checkAgeMonthsOverflow(Collection $visits, array $memberRaw): array
+    {
+        $visitsByHh = $visits->keyBy('household_id');
+
+        $members = collect($memberRaw)->filter(fn($r) =>
+            $r['household_id'] !== '' &&
+            ($r['redcap_repeat_instrument'] ?? '') === 'section_1_membres_du_mnage' &&
+            $r['redcap_repeat_instance'] !== '' &&
+            is_numeric($r['c_age_months'] ?? '') &&
+            (int) $r['c_age_months'] >= 12
+        );
+
+        $results = [];
+        foreach ($members as $r) {
+            $id       = $r['household_id'];
+            $name     = trim($r['c_hhm_name'] ?? '') ?: "membre instance {$r['redcap_repeat_instance']}";
+            $months   = (int) $r['c_age_months'];
+            $curYears = is_numeric($r['c_age_years'] ?? '') ? (int) $r['c_age_years'] : 0;
+
+            $extraYears    = (int) floor($months / 12);
+            $remainMonths  = $months % 12;
+            $newYears      = $curYears + $extraYears;
+
+            $visit   = $visitsByHh->get($id, []);
+            $results[] = $this->q('Q-MBR-03', 'warning',
+                "Âge en mois invalide pour {$name}",
+                "Pour le membre « {$name} » du ménage {$id}, la valeur saisie dans c_age_months (Q07.2) est {$months} mois, ce qui est ≥ 12. Cette valeur doit être convertie : {$months} mois = {$extraYears} an(s) et {$remainMonths} mois.",
+                "Corriger dans REDCap : c_age_years (Q07) de {$curYears} → {$newYears} an(s) ; c_age_months (Q07.2) de {$months} → {$remainMonths} mois.",
+                [
+                    'event'        => 'baseline_et_distri_arm_1',
+                    'form'         => 'section_1_membres_du_mnage',
+                    'household_id' => $id,
+                    'tablet'       => $visit['a_tablette_id']  ?? '',
+                    'initials'     => $visit['a_initiales_id'] ?? '',
+                    'field'        => 'c_age_months (Q07.2)',
+                    'value'        => "c_age_months = {$months}  |  c_age_years actuel = {$curYears}",
+                ]
+            );
         }
         return $results;
     }

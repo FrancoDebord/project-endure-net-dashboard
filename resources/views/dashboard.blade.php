@@ -146,6 +146,22 @@
                 </svg>
                 GPS
             </a>
+            <a href="{{ route('inspections') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+                </svg>
+                Inspections
+            </a>
+            <a href="{{ route('docs') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+                Docs
+            </a>
             <form method="POST" action="{{ route('cache.clear') }}">
                 @csrf
                 <button type="submit"
@@ -157,6 +173,14 @@
                     Actualiser
                 </button>
             </form>
+            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/20">
+                <div class="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {{ strtoupper(substr(auth()->user()->prenom ?: auth()->user()->nom, 0, 1)) }}
+                </div>
+                <span class="text-xs font-medium leading-tight">
+                    {{ trim(auth()->user()->prenom . ' ' . auth()->user()->nom) }}
+                </span>
+            </div>
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit"
@@ -1445,27 +1469,58 @@
                 $distColors = ['#C41230','#374151','#D97706','#16A34A','#7C3AED','#0891B2','#DB2777','#059669','#EA580C','#4338CA','#0D9488','#9333EA'];
             @endphp
 
+            <div class="flex items-center gap-4 mb-4 text-xs text-gray-500">
+                <span class="font-semibold text-gray-600">Dotation MILDA :</span>
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-green-400"></span> Conforme (1 MILDA / 2–3 pers.)</span>
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-orange-400"></span> Sous-doté</span>
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-full bg-blue-400"></span> Sur-doté</span>
+            </div>
+
             @foreach ($netsByTablet as $dti => $tabletGroup)
-            <div class="dist-tablet-section mb-6" data-tablet="{{ $tabletGroup['tablet'] }}">
-                <div class="flex items-center gap-2 mb-2">
-                    <span class="inline-block w-3 h-3 rounded-sm flex-shrink-0"
-                          style="background:{{ $distColors[$dti % count($distColors)] }}"></span>
-                    <p class="font-bold text-sm text-gray-800">
-                        Tablette {{ $tabletGroup['tablet'] }}
+            <details class="dist-tablet-section mb-4 rounded-xl border border-gray-200 overflow-hidden" open
+                     data-tablet="{{ $tabletGroup['tablet'] }}">
+                <summary class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none"
+                         style="background:#F8F9FB">
+                    <div class="flex items-center gap-2 min-w-0 flex-wrap">
+                        <span class="inline-block w-3 h-3 rounded-sm flex-shrink-0"
+                              style="background:{{ $distColors[$dti % count($distColors)] }}"></span>
+                        <span class="font-bold text-sm text-gray-800">Tablette {{ $tabletGroup['tablet'] }}</span>
+                        @php $tabletBras = $tabletGroup['households']->first()['bras'] ?? ''; @endphp
+                        @if ($tabletBras)
+                            <span class="text-xs font-semibold px-2 py-0.5 rounded-full
+                                {{ str_contains($tabletBras, 'DUAL') ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700' }}">
+                                {{ $tabletBras }}
+                            </span>
+                        @endif
                         <span class="font-normal text-gray-500 text-xs">
                             — {{ $tabletGroup['visited'] }} visité(s)
                             · {{ $tabletGroup['consented'] }} enrôlé(s)
                             · <span class="dist-tablet-nets">{{ $tabletGroup['total'] }}</span> moustiquaire(s)
                             sur <span class="dist-tablet-hh">{{ count($tabletGroup['households']) }}</span> ménage(s)
                         </span>
-                    </p>
-                </div>
-                <div class="overflow-x-auto rounded-xl border border-gray-200">
+                        @if ($tabletGroup['net_low'] > 0)
+                            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                                {{ $tabletGroup['net_low'] }} sous-doté{{ $tabletGroup['net_low'] > 1 ? 's' : '' }}
+                            </span>
+                        @endif
+                        @if ($tabletGroup['net_high'] > 0)
+                            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                {{ $tabletGroup['net_high'] }} sur-doté{{ $tabletGroup['net_high'] > 1 ? 's' : '' }}
+                            </span>
+                        @endif
+                    </div>
+                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0 chevron"
+                         fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </summary>
+                <div class="overflow-x-auto">
                     <table class="w-full text-xs border-collapse">
                         <thead>
                             <tr>
-                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:36%">Code Ménage</th>
-                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:18%">Date visite</th>
+                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:28%">Code Ménage</th>
+                                <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:8%">Taille</th>
+                                <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:14%">Date visite</th>
                                 <th class="text-left px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A">Codes Moustiquaires</th>
                                 <th class="text-right px-3 py-2 text-white text-xs font-bold uppercase tracking-wide" style="background:#1A1A1A;width:10%">Total</th>
                             </tr>
@@ -1476,23 +1531,33 @@
                                 data-date="{{ $hh['date_visit'] }}"
                                 data-nets="{{ $hh['total'] }}">
                                 <td class="px-3 py-2 font-mono">{{ $hh['household_id'] }}</td>
+                                <td class="px-3 py-2 text-right font-semibold text-gray-700">{{ $hh['members'] ?: '—' }}</td>
                                 <td class="px-3 py-2 text-gray-600">
                                     {{ $hh['date_visit'] ? \Carbon\Carbon::parse($hh['date_visit'])->format('d/m/Y') : '—' }}
                                 </td>
                                 <td class="px-3 py-2 text-gray-700">{{ $hh['nets']->implode(' · ') }}</td>
-                                <td class="px-3 py-2 text-right font-bold text-gray-800">{{ $hh['total'] }}</td>
+                                <td class="px-3 py-2 text-right font-bold text-gray-800">
+                                    {{ $hh['total'] }}
+                                    @if ($hh['net_status'] === 'low')
+                                        <span class="text-xs font-semibold text-orange-600 ml-1 whitespace-nowrap"
+                                              title="Attendu {{ $hh['net_min'] }}–{{ $hh['net_max'] }} pour {{ $hh['members'] }} pers.">sous-doté</span>
+                                    @elseif ($hh['net_status'] === 'high')
+                                        <span class="text-xs font-semibold text-blue-600 ml-1 whitespace-nowrap"
+                                              title="Attendu {{ $hh['net_min'] }}–{{ $hh['net_max'] }} pour {{ $hh['members'] }} pers.">sur-doté</span>
+                                    @endif
+                                </td>
                             </tr>
                             @endforeach
                         </tbody>
                         <tfoot>
                             <tr style="background:#C41230">
-                                <td colspan="3" class="px-3 py-2 text-white font-bold text-xs">Total Tablette {{ $tabletGroup['tablet'] }}</td>
+                                <td colspan="4" class="px-3 py-2 text-white font-bold text-xs">Total Tablette {{ $tabletGroup['tablet'] }}</td>
                                 <td class="px-3 py-2 text-right text-white font-bold dist-tablet-total">{{ $tabletGroup['total'] }}</td>
                             </tr>
                         </tfoot>
                     </table>
                 </div>
-            </div>
+            </details>
             @endforeach
 
             @endif
