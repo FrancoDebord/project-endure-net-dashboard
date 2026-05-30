@@ -36,10 +36,18 @@ return [
     ],
 
     'microsoft' => [
-        'client_id'     => env('MICROSOFT_CLIENT_ID',"1bfe3830-ac97-4fce-bfd4-758625cf28ae"),
+        'client_id'     => env('MICROSOFT_CLIENT_ID',""),
         'client_secret' => env('MICROSOFT_CLIENT_SECRET',""),
         'redirect'      => env('MICROSOFT_REDIRECT_URI', '/auth/microsoft/callback'),
-        'tenant'        => env('MICROSOFT_TENANT_ID', 'f0d92767-dc48-4d82-8b6c-e51546bebab3'),
+        'tenant'        => env('MICROSOFT_TENANT_ID', ''),
     ],
+
+    
+    // 'microsoft' => [
+    //     'client_id'     => env('MICROSOFT_CLIENT_ID',"1bfe3830-ac97-4fce-bfd4-758625cf28ae"),
+    //     'client_secret' => env('MICROSOFT_CLIENT_SECRET',""),
+    //     'redirect'      => env('MICROSOFT_REDIRECT_URI', '/auth/microsoft/callback'),
+    //     'tenant'        => env('MICROSOFT_TENANT_ID', 'f0d92767-dc48-4d82-8b6c-e51546bebab3'),
+    // ],
 
 ];
