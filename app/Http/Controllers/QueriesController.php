@@ -22,9 +22,12 @@ class QueriesController extends Controller
 
     // Grappe globale (cluster_id 1-8) → numéro relatif au sein du village (2 chiffres)
     private const GRAPPE_RELATIVE = [
-        '1' => '01', '2' => '02',            // Djigbe
-        '3' => '01', '4' => '02', '5' => '03', // Gbonou
-        '6' => '01', '7' => '02', '8' => '03', // Miniffi
+        '1'  => '01', '2'  => '02',                        // Djigbe
+        '3'  => '01', '4'  => '02', '5'  => '03',          // Gbonou
+        '6'  => '01', '7'  => '02', '8'  => '03', '9' => '04', // Miniffi
+        '10' => '01',  // Dogbo
+        '11' => '01',  // Agao
+        '12' => '01',  // Akoba
     ];
     // Bras numérique → code dans l'identifiant
     private const BRAS_CODE = ['1' => 'PD', '2' => 'G2'];
@@ -34,7 +37,11 @@ class QueriesController extends Controller
         '5' => '1', '6' => '2', '7' => '1', '8' => '1',
     ];
     // Village REDCap (code numérique ou string) → code dans l'identifiant
-    private const VILLAGE_CODE = ['1' => 'DJ', '2' => 'GB', '3' => 'MI', 'DJ' => 'DJ', 'GB' => 'GB', 'MI' => 'MI'];
+    private const VILLAGE_CODE = [
+        '1' => 'DJ', '2' => 'GB', '3' => 'MI',
+        'DJ' => 'DJ', 'GB' => 'GB', 'MI' => 'MI',
+        'DO' => 'DO', 'AG' => 'AG', 'AK' => 'AK',
+    ];
 
     private const FORM_LABELS = [
         'form_1a_visite_menage'                                  => 'Visite Ménage (Form 1A)',
@@ -497,7 +504,7 @@ class QueriesController extends Controller
 
     private function checkHouseholdIdFormat(array $idRaw, array $visiteRaw): array
     {
-        $pattern = '/^(DJ|GB|MI)-(0[1-3])-(PD|G2)-(0[1-9]|1[0-9]|20)-(00[1-9]|0[1-9]\d|[1-9]\d{2})$/';
+        $pattern = '/^(DJ|GB|MI|DO|AG|AK)-(0[1-9])-(PD|G2)-(0[1-9]|1[0-9]|20)-(00[1-9]|0[1-9]\d|[1-9]\d{2})$/';
 
         // Tablette et initiales par ménage (depuis form_1a_visite_menage)
         // a_numero_tablette = numéro brut (ex: 3) utilisé pour la comparaison avec l'identifiant
@@ -530,7 +537,7 @@ class QueriesController extends Controller
                 $results[] = $this->q('Q-ID-01', 'critical',
                     'Identifiant ménage — format incorrect',
                     "L'identifiant « {$id} » ne respecte pas le format attendu : VILLAGE-GRAPPE-BRAS-TABLETTE-MENAGE (ex : MI-03-PD-01-024). Chaque partie doit être séparée par un tiret, avec les chiffres zéro-complétés.",
-                    "Corriger l'identifiant dans REDCap pour qu'il corresponde au format : code village (DJ/GB/MI), numéro de grappe (01–03), code bras (PD/G2), numéro tablette (01–20), numéro ménage (001–999).",
+                    "Corriger l'identifiant dans REDCap pour qu'il corresponde au format : code village (DJ/GB/MI/DO/AG/AK), numéro de grappe (01–09), code bras (PD/G2), numéro tablette (01–20), numéro ménage (001–999).",
                     [
                         'event'        => 'baseline_et_distri_arm_1',
                         'form'         => 'form_1a_identification',

@@ -1,7 +1,7 @@
 # Documentation utilisateur — ENDURE-Net Dashboard
 
-**Version :** 1.0 · **Date :** Mai 2026  
-**Projet :** AIRID / ENDURE-Net · Suivi MILDA, données REDCap
+**Version :** 1.1 · **Date :** Mai 2026  
+**Projet :** AIRID / ENDURE-Net · Suivi MILDA, données REDCap & KoboToolbox
 
 ---
 
@@ -19,6 +19,8 @@
 10. [Module Export GPS](#10-module-export-gps)
 11. [Exports PDF](#11-exports-pdf)
 12. [Actualisation du cache](#12-actualisation-du-cache)
+13. [Module Inspections physiques](#13-module-inspections-physiques)
+14. [Rapport d'exécution par bras](#14-rapport-dexécution-par-bras)
 
 ---
 
@@ -30,6 +32,8 @@ Le tableau de bord ENDURE-Net est une application web de suivi des données de t
 - **Contrôle qualité** : détection automatique d'incohérences et de données manquantes
 - **Export GPS** : génération de fichiers GPX pour la navigation terrain (OsmAnd)
 - **Rapports PDF** : impression de tableaux de distribution, rapports de performance
+- **Inspections physiques** : suivi des inspections de moustiquaires via KoboToolbox
+- **Rapport bras** : taux d'exécution par bras de traitement et par cohorte
 
 **Zones géographiques couvertes :**
 
@@ -85,6 +89,9 @@ La bannière affiche :
 - Le logo et le nom de l'application **ENDURE-Net**
 - Un lien **"Queries"** vers le module de contrôle qualité
 - Un lien **"GPS"** vers le module d'export GPS
+- Un lien **"Rapport bras"** vers le rapport d'exécution par bras
+- Un lien **"Inspections"** vers le module d'inspections physiques
+- Un lien **"Docs"** vers cette documentation
 - Un bouton **"Actualiser"** pour vider le cache et recharger les données REDCap
 - Le **nom de l'utilisateur connecté** (initiales + prénom nom)
 - Le bouton **"Déconnexion"**
@@ -432,4 +439,155 @@ Pour forcer le rechargement depuis REDCap :
 
 ---
 
-*Documentation générée pour AIRID — ENDURE-Net · Mai 2026*
+---
+
+## 13. Module Inspections physiques
+
+Accessible via le lien **"Inspections"** dans la bannière, ou l'URL `/inspections`.
+
+### 13.1 Présentation
+
+Ce module affiche les données des inspections physiques de moustiquaires collectées via **KoboToolbox** (formulaire dédié). Il permet de suivre l'état des moustiquaires stockées par marque, lot, lieu de stockage et enquêteur.
+
+### 13.2 Cartes KPI
+
+Quatre indicateurs s'affichent en haut de page :
+
+| Carte | Description |
+|---|---|
+| **Total inspections** | Nombre total d'inspections enregistrées |
+| **7 derniers jours** | Inspections effectuées dans la semaine |
+| **30 derniers jours** | Inspections effectuées dans le mois |
+| **Enquêteurs** | Nombre d'enquêteurs distincts ayant effectué des inspections |
+
+### 13.3 Cartes par marque
+
+Deux cartes colorées résument les inspections par marque de moustiquaire :
+
+- **PMD** (PermaNet Dual) — violet
+- **IG2** (Interceptor G2) — bleu
+
+Chaque carte affiche le nombre d'inspections et le pourcentage sur le total. Cliquer sur une carte **filtre automatiquement** le tableau sur cette marque.
+
+### 13.4 Filtres
+
+| Filtre | Description |
+|---|---|
+| **Recherche** | Recherche libre dans toutes les colonnes |
+| **Enquêteur** | Filtre par initiales de l'enquêteur (`initiales`) |
+| **Marque** | Filtre par type de moustiquaire (`moustiquaires/itn_brand`) : PMD ou IG2 |
+| **Lieu d'entrepôt** | Filtre par lieu de stockage (`lieu_entrepot`) |
+| **N° lot** | Filtre par numéro de lot (`moustiquaires/lot_number`) — mis à jour dynamiquement selon la marque sélectionnée |
+| **Date de début / fin** | Filtre par date d'inspection |
+
+> Lorsque vous sélectionnez une marque, la liste des lots se met automatiquement à jour pour n'afficher que les lots de cette marque.
+
+### 13.5 Tableau des inspections
+
+Le tableau affiche toutes les inspections avec les colonnes suivantes (entêtes = noms de variables bruts) :
+
+| Variable | Contenu |
+|---|---|
+| `_id` | Identifiant unique de la soumission KoboToolbox |
+| `initiales` | Initiales de l'enquêteur |
+| `itn_brand` | Marque de la moustiquaire (PMD / IG2) |
+| `date_inspection` | Date de l'inspection |
+| `code_moustiquaire` | Code unique de la moustiquaire |
+| `type_moustiquaire` | Type de moustiquaire |
+| `fabricant` | Fabricant |
+| `modele` | Modèle |
+| `lot_number` | Numéro de lot |
+| `numero_balle` | Numéro de balle |
+| `sampling_position` | Position de prélèvement |
+| `lieu_entrepot` | Lieu d'entrepôt |
+| `remarque` | Remarques de l'enquêteur |
+| `presence` | Présence de la moustiquaire |
+
+### 13.6 Export CSV
+
+> Cette fonctionnalité est **réservée à l'administrateur** (`francis.houeha@airid-africa.com`).
+
+Le bouton **"Export CSV"** génère un fichier CSV (séparateur `;`, encodage UTF-8 avec BOM) de toutes les inspections, avec :
+- Les colonnes identiques au tableau
+- Les coordonnées GPS (`latitude`, `longitude`) en colonnes supplémentaires
+- Les en-têtes sont les noms de variables bruts
+
+### 13.7 Actualisation du cache
+
+Le bouton **"Actualiser"** vide le cache KoboToolbox (durée : 30 minutes) et recharge les données depuis l'API. L'opération peut prendre quelques secondes.
+
+---
+
+## 14. Rapport d'exécution par bras
+
+Accessible via le lien **"Rapport bras"** dans la bannière, ou l'URL `/rapport/bras`.
+
+### 14.1 Présentation
+
+Ce rapport présente le taux d'exécution du protocole d'enrôlement et de distribution de moustiquaires, organisé par **bras de traitement** et **cohorte**. Il est conçu pour être partagé en réunion ou exporté en PDF.
+
+**Cibles protocole :**
+- **921 ménages par bras** (611 en Cohorte A + 310 en Cohorte B)
+- **3 moustiquaires par ménage** enrôlé en moyenne
+- Total : 1 842 ménages · 5 526 moustiquaires
+
+### 14.2 Indicateurs globaux
+
+Quatre cartes affichent les chiffres agrégés tous bras confondus :
+
+| Carte | Description |
+|---|---|
+| **Ménages enrôlés** | Total enrôlé vs cible 1 842, avec taux et barre de progression |
+| **Moustiquaires distribuées** | Total distribué vs cible 5 526, avec taux et barre de progression |
+| **Ménages restants** | Nombre de ménages encore à enrôler pour atteindre la cible |
+| **Filets attendus** | Nombre de moustiquaires supplémentaires attendues |
+
+### 14.3 Cartes par bras
+
+Deux cartes colorées, une par bras :
+
+- **Bras 1 — PERMANET DUAL** (violet)
+- **Bras 2 — INTERCEPTOR G2** (bleu)
+
+Chaque carte affiche :
+- Le nombre total de ménages enrôlés et les barres de progression (ménages + moustiquaires)
+- Le détail par **Cohorte A** et **Cohorte B** avec :
+  - Nombre de ménages enrôlés / cible
+  - Nombre de moustiquaires distribuées / cible
+  - Nombre de ménages et filets restants
+  - Taux d'exécution et moyenne filets/ménage
+
+### 14.4 Tableau récapitulatif
+
+Un tableau complet présente toutes les valeurs en une vue :
+
+| Colonne | Description |
+|---|---|
+| Bras | PERMANET DUAL ou INTERCEPTOR G2 |
+| Cohorte | A ou B |
+| Cible ménages | Nombre de ménages attendus |
+| Enrôlés | Nombre de ménages enrôlés |
+| Taux | Taux d'exécution (code couleur) |
+| Restants | Ménages à compléter |
+| Cible filets | Nombre de moustiquaires attendues |
+| Distribués | Nombre de moustiquaires distribuées |
+| Taux | Taux d'exécution moustiquaires |
+| Manquants | Moustiquaires supplémentaires à distribuer |
+
+Des **lignes de sous-total** par bras et une **ligne TOTAL** (fond sombre) récapitulent les chiffres.
+
+### 14.5 Code couleur des taux
+
+| Couleur | Seuil | Signification |
+|---|---|---|
+| Vert | ≥ 90% | Objectif quasi atteint |
+| Orange | ≥ 70% | En cours — vigilance |
+| Rouge | < 70% | Retard significatif |
+
+### 14.6 Téléchargement PDF
+
+Le bouton **"Télécharger PDF"** dans la bannière génère directement un fichier PDF téléchargeable (`rapport-bras-AAAA-MM-JJ.pdf`) mis en page au format A4 portrait, sans passer par le dialogue d'impression du navigateur.
+
+---
+
+*Documentation générée pour AIRID — ENDURE-Net · Mai 2026 · v1.1*

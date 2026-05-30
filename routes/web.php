@@ -5,6 +5,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GpsExportController;
 use App\Http\Controllers\InspectionController;
 use App\Http\Controllers\QueriesController;
+use App\Http\Controllers\RapportBrasController;
 use Illuminate\Support\Facades\Route;
 
 // Auth routes (guest only)
@@ -36,6 +37,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/gps-export',  [GpsExportController::class, 'index'])->name('gps.export');
     Route::post('/gps-export', [GpsExportController::class, 'export'])->name('gps.export.download');
     Route::get('/docs', fn() => view('docs'))->name('docs');
+    Route::get('/rapport/bras',     [RapportBrasController::class, 'index'])->name('rapport.bras');
+    Route::get('/rapport/bras/pdf', [RapportBrasController::class, 'pdf'])->name('rapport.bras.pdf');
     Route::get('/inspections',          [InspectionController::class, 'index'])->name('inspections');
     Route::get('/inspections/export',   [InspectionController::class, 'export'])->name('inspections.export');
     Route::post('/inspections/refresh', [InspectionController::class, 'clearCache'])->name('inspections.refresh');

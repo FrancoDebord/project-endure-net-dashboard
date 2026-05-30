@@ -6,7 +6,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 @page {
-    margin: 2cm 2cm 2cm 2cm;
+    margin: 2cm 2.5cm;
     size: A4 portrait;
 }
 

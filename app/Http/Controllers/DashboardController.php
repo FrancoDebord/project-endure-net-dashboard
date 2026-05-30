@@ -11,21 +11,31 @@ use Illuminate\View\View;
 class DashboardController extends Controller
 {
     private const CLUSTER_LABELS = [
-        '1' => 'Djigbe / Grappe 1', '2' => 'Djigbe / Grappe 2',
-        '3' => 'Gbonou / Grappe 1', '4' => 'Gbonou / Grappe 2', '5' => 'Gbonou / Grappe 3',
-        '6' => 'Miniffi / Grappe 1','7' => 'Miniffi / Grappe 2','8' => 'Miniffi / Grappe 3',
+        '1'  => 'Djigbe / Grappe 1',  '2'  => 'Djigbe / Grappe 2',
+        '3'  => 'Gbonou / Grappe 1',  '4'  => 'Gbonou / Grappe 2',  '5'  => 'Gbonou / Grappe 3',
+        '6'  => 'Miniffi / Grappe 1', '7'  => 'Miniffi / Grappe 2', '8'  => 'Miniffi / Grappe 3',
+        '9'  => 'Miniffi / Grappe 4',
+        '10' => 'Dogbo / Grappe 1',
+        '11' => 'Agao / Grappe 1',
+        '12' => 'Akoba / Grappe 1',
     ];
     // Mapping (village, grappe) → cluster key, derived from household ID format
     private const CLUSTER_FROM_ID = [
-        'DJ' => ['01' => '1', '02' => '2'],
-        'GB' => ['01' => '3', '02' => '4', '03' => '5'],
-        'MI' => ['01' => '6', '02' => '7', '03' => '8'],
+        'DJ' => ['01' => '1',  '02' => '2'],
+        'GB' => ['01' => '3',  '02' => '4',  '03' => '5'],
+        'MI' => ['01' => '6',  '02' => '7',  '03' => '8', '04' => '9'],
+        'DO' => ['01' => '10'],
+        'AG' => ['01' => '11'],
+        'AK' => ['01' => '12'],
     ];
     // Accepte les codes numériques (1/2/3) et alphanumériques (DJ/GB/MI) selon export REDCap
     private const VILLAGE_LABELS = [
-        'DJ' => 'Djigbe', '1' => 'Djigbe',
-        'GB' => 'Gbonou', '2' => 'Gbonou',
+        'DJ' => 'Djigbe',  '1' => 'Djigbe',
+        'GB' => 'Gbonou',  '2' => 'Gbonou',
         'MI' => 'Miniffi', '3' => 'Miniffi',
+        'DO' => 'Dogbo',
+        'AG' => 'Agao',
+        'AK' => 'Akoba',
     ];
     private const BRAS_LABELS = ['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'];
     // Cluster global (1-8) → bras : PD si cluster ∈ {1,5,7,8}, G2 si ∈ {2,3,4,6}
@@ -60,8 +70,8 @@ class DashboardController extends Controller
         $village = strtoupper($village);
         $bras    = strtoupper($bras);
 
-        $valid = in_array($village, ['DJ', 'GB', 'MI'])
-              && preg_match('/^0[1-3]$/', $grappe)
+        $valid = in_array($village, ['DJ', 'GB', 'MI', 'DO', 'AG', 'AK'])
+              && preg_match('/^0[1-9]$/', $grappe)
               && in_array($bras, ['PD', 'G2'])
               && preg_match('/^(0[1-9]|1[0-9]|20)$/', $tablette)
               && preg_match('/^\d{3}$/', $menage)

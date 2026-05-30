@@ -84,6 +84,8 @@
                 <a class="nav-link" href="#gps">Export GPS</a>
                 <a class="nav-link" href="#pdf">Exports PDF</a>
                 <a class="nav-link" href="#cache">Cache</a>
+                <a class="nav-link" href="#inspections">Inspections physiques</a>
+                <a class="nav-link" href="#rapport-bras">Rapport par bras</a>
             </nav>
         </div>
     </aside>
@@ -95,7 +97,7 @@
             {{-- Hero --}}
             <div class="mb-8 p-5 rounded-xl" style="background:linear-gradient(135deg,#8B0D21,#C41230)">
                 <h1 class="text-white font-extrabold text-xl mb-1 mt-0" style="border:none;padding:0;margin-top:0">Documentation utilisateur — ENDURE-Net Dashboard</h1>
-                <p class="text-red-100 text-sm mb-0">Version 1.0 · Mai 2026 · Projet AIRID / ENDURE-Net · Données REDCap</p>
+                <p class="text-red-100 text-sm mb-0">Version 1.1 · Mai 2026 · Projet AIRID / ENDURE-Net · Données REDCap &amp; KoboToolbox</p>
             </div>
 
             {{-- 1. Vue d'ensemble --}}
@@ -106,6 +108,8 @@
                 <li><strong>Contrôle qualité</strong> : détection automatique d'incohérences et de données manquantes</li>
                 <li><strong>Export GPS</strong> : génération de fichiers GPX pour la navigation terrain (OsmAnd)</li>
                 <li><strong>Rapports PDF</strong> : impression de tableaux de distribution, rapports de performance</li>
+                <li><strong>Inspections physiques</strong> : suivi des inspections de moustiquaires via KoboToolbox</li>
+                <li><strong>Rapport bras</strong> : taux d'exécution par bras de traitement (PERMANET DUAL / INTERCEPTOR G2) et par cohorte</li>
             </ul>
 
             <h3>Zones géographiques et bras de l'étude</h3>
@@ -161,6 +165,8 @@
                 <li>Le logo et le nom de l'application <strong>ENDURE-Net</strong></li>
                 <li>Un lien <strong>"Queries"</strong> vers le module de contrôle qualité</li>
                 <li>Un lien <strong>"GPS"</strong> vers le module d'export GPS</li>
+                <li>Un lien <strong>"Rapport bras"</strong> vers le rapport d'exécution par bras</li>
+                <li>Un lien <strong>"Inspections"</strong> vers le module d'inspections physiques</li>
                 <li>Un lien <strong>"Docs"</strong> vers cette documentation</li>
                 <li>Un bouton <strong>"Actualiser"</strong> pour vider le cache et recharger les données REDCap</li>
                 <li>Le <strong>nom de l'utilisateur connecté</strong> (initiales + prénom nom)</li>
@@ -371,8 +377,117 @@
             </ol>
             <blockquote>L'actualisation peut prendre quelques secondes selon le volume de données REDCap.</blockquote>
 
+            {{-- 13. Inspections physiques --}}
+            <h2 id="inspections">13. Module Inspections physiques</h2>
+            <p>Accessible via le lien <strong>"Inspections"</strong> dans la bannière ou <code>/inspections</code>. Ce module affiche les données des inspections physiques de moustiquaires collectées via <strong>KoboToolbox</strong>. Il permet de suivre l'état des moustiquaires stockées par marque, lot, lieu et enquêteur.</p>
+
+            <h3>Cartes KPI</h3>
+            <table>
+                <thead><tr><th>Carte</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>Total inspections</strong></td><td>Nombre total d'inspections enregistrées</td></tr>
+                    <tr><td><strong>7 derniers jours</strong></td><td>Inspections effectuées dans la semaine</td></tr>
+                    <tr><td><strong>30 derniers jours</strong></td><td>Inspections effectuées dans le mois</td></tr>
+                    <tr><td><strong>Enquêteurs</strong></td><td>Nombre d'enquêteurs distincts ayant effectué des inspections</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Cartes par marque</h3>
+            <p>Deux cartes résument les inspections par marque. Cliquer sur une carte <strong>filtre automatiquement</strong> le tableau sur cette marque :</p>
+            <ul>
+                <li><strong>PMD</strong> — PermaNet Dual (violet)</li>
+                <li><strong>IG2</strong> — Interceptor G2 (bleu)</li>
+            </ul>
+
+            <h3>Filtres disponibles</h3>
+            <table>
+                <thead><tr><th>Filtre</th><th>Variable</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td>Recherche</td><td>—</td><td>Recherche libre dans toutes les colonnes</td></tr>
+                    <tr><td>Enquêteur</td><td><code>initiales</code></td><td>Filtre par initiales de l'enquêteur</td></tr>
+                    <tr><td>Marque</td><td><code>moustiquaires/itn_brand</code></td><td>PMD ou IG2</td></tr>
+                    <tr><td>Lieu d'entrepôt</td><td><code>lieu_entrepot</code></td><td>Filtre par lieu de stockage</td></tr>
+                    <tr><td>N° lot</td><td><code>moustiquaires/lot_number</code></td><td>Mis à jour dynamiquement selon la marque</td></tr>
+                    <tr><td>Date début / fin</td><td><code>date_inspection</code></td><td>Filtre par période d'inspection</td></tr>
+                </tbody>
+            </table>
+            <blockquote>Lorsque vous sélectionnez une marque, la liste des lots se met automatiquement à jour pour n'afficher que les lots de cette marque.</blockquote>
+
+            <h3>Colonnes du tableau</h3>
+            <p>Les en-têtes affichent les <strong>noms de variables bruts</strong> du formulaire KoboToolbox :</p>
+            <table>
+                <thead><tr><th>Variable</th><th>Contenu</th></tr></thead>
+                <tbody>
+                    <tr><td><code>_id</code></td><td>Identifiant unique de la soumission KoboToolbox</td></tr>
+                    <tr><td><code>initiales</code></td><td>Initiales de l'enquêteur</td></tr>
+                    <tr><td><code>itn_brand</code></td><td>Marque de la moustiquaire (PMD / IG2)</td></tr>
+                    <tr><td><code>date_inspection</code></td><td>Date de l'inspection</td></tr>
+                    <tr><td><code>code_moustiquaire</code></td><td>Code unique de la moustiquaire</td></tr>
+                    <tr><td><code>type_moustiquaire</code></td><td>Type de moustiquaire</td></tr>
+                    <tr><td><code>fabricant</code></td><td>Fabricant</td></tr>
+                    <tr><td><code>modele</code></td><td>Modèle</td></tr>
+                    <tr><td><code>lot_number</code></td><td>Numéro de lot</td></tr>
+                    <tr><td><code>numero_balle</code></td><td>Numéro de balle</td></tr>
+                    <tr><td><code>sampling_position</code></td><td>Position de prélèvement</td></tr>
+                    <tr><td><code>lieu_entrepot</code></td><td>Lieu d'entrepôt</td></tr>
+                    <tr><td><code>remarque</code></td><td>Remarques de l'enquêteur</td></tr>
+                    <tr><td><code>presence</code></td><td>Présence de la moustiquaire</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Export CSV</h3>
+            <p>Le bouton <strong>"Export CSV"</strong> est réservé à l'administrateur. Il génère un fichier CSV (séparateur <code>;</code>, encodage UTF-8) de toutes les inspections, incluant les colonnes du tableau et les coordonnées GPS (<code>latitude</code>, <code>longitude</code>).</p>
+
+            <h3>Actualisation du cache</h3>
+            <p>Le bouton <strong>"Actualiser"</strong> vide le cache KoboToolbox (durée : 30 minutes) et recharge les données depuis l'API.</p>
+
+            {{-- 14. Rapport bras --}}
+            <h2 id="rapport-bras">14. Rapport d'exécution par bras</h2>
+            <p>Accessible via le lien <strong>"Rapport bras"</strong> dans la bannière ou <code>/rapport/bras</code>. Ce rapport présente le taux d'exécution du protocole d'enrôlement et de distribution de moustiquaires, par bras de traitement et par cohorte.</p>
+
+            <h3>Cibles protocole</h3>
+            <ul>
+                <li><strong>921 ménages par bras</strong> — dont 611 en Cohorte A et 310 en Cohorte B</li>
+                <li><strong>3 moustiquaires par ménage</strong> en moyenne → 2 763 moustiquaires par bras</li>
+                <li>Total global : 1 842 ménages · 5 526 moustiquaires</li>
+            </ul>
+
+            <h3>Indicateurs globaux</h3>
+            <table>
+                <thead><tr><th>Carte</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>Ménages enrôlés</strong></td><td>Total enrôlé vs cible 1 842, avec barre de progression</td></tr>
+                    <tr><td><strong>Moustiquaires distribuées</strong></td><td>Total distribué vs cible 5 526, avec barre de progression</td></tr>
+                    <tr><td><strong>Ménages restants</strong></td><td>Ménages encore à enrôler pour atteindre la cible</td></tr>
+                    <tr><td><strong>Filets attendus</strong></td><td>Moustiquaires supplémentaires à distribuer</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Cartes par bras</h3>
+            <p>Deux cartes colorées (violet pour PERMANET DUAL, bleu pour INTERCEPTOR G2) détaillent chaque bras :</p>
+            <ul>
+                <li>Nombre total de ménages enrôlés et barres de progression (ménages + moustiquaires)</li>
+                <li>Détail par <strong>Cohorte A</strong> et <strong>Cohorte B</strong> : enrôlés / cible, distribués / cible, restants à compléter, moyenne filets/ménage</li>
+            </ul>
+
+            <h3>Tableau récapitulatif</h3>
+            <p>Un tableau complet (Bras × Cohorte) présente toutes les valeurs : cible ménages, enrôlés, taux, restants, cible filets, distribués, taux, manquants. Des sous-totaux par bras et une ligne TOTAL global sont inclus.</p>
+
+            <h3>Code couleur des taux</h3>
+            <table>
+                <thead><tr><th>Couleur</th><th>Seuil</th><th>Signification</th></tr></thead>
+                <tbody>
+                    <tr><td style="color:#15803D;font-weight:700">Vert</td><td>≥ 90%</td><td>Objectif quasi atteint</td></tr>
+                    <tr><td style="color:#92400E;font-weight:700">Orange</td><td>≥ 70%</td><td>En cours — vigilance recommandée</td></tr>
+                    <tr><td style="color:#991B1B;font-weight:700">Rouge</td><td>&lt; 70%</td><td>Retard significatif</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Téléchargement PDF</h3>
+            <p>Le bouton <strong>"Télécharger PDF"</strong> dans la bannière génère directement un fichier PDF téléchargeable (<code>rapport-bras-AAAA-MM-JJ.pdf</code>) au format A4 portrait, sans passer par le dialogue d'impression du navigateur.</p>
+
             <div class="mt-10 pt-6 border-t border-gray-100 text-center">
-                <p class="text-xs text-gray-400">© {{ date('Y') }} AIRID — ENDURE-Net · Documentation interne</p>
+                <p class="text-xs text-gray-400">© {{ date('Y') }} AIRID — ENDURE-Net · Documentation interne · v1.1</p>
             </div>
 
         </div>

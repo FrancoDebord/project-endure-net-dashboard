@@ -10,27 +10,65 @@ use ZipArchive;
 class GpsExportController extends Controller
 {
     private const CLUSTER_LABELS = [
-        '1' => 'Djigbe / Grappe 1',  '2' => 'Djigbe / Grappe 2',
-        '3' => 'Gbonou / Grappe 1',  '4' => 'Gbonou / Grappe 2',  '5' => 'Gbonou / Grappe 3',
-        '6' => 'Miniffi / Grappe 1', '7' => 'Miniffi / Grappe 2', '8' => 'Miniffi / Grappe 3',
+        '1'  => 'Djigbe / Grappe 1',  '2'  => 'Djigbe / Grappe 2',
+        '3'  => 'Gbonou / Grappe 1',  '4'  => 'Gbonou / Grappe 2',  '5'  => 'Gbonou / Grappe 3',
+        '6'  => 'Miniffi / Grappe 1', '7'  => 'Miniffi / Grappe 2', '8'  => 'Miniffi / Grappe 3',
+        '9'  => 'Miniffi / Grappe 4',
+        '10' => 'Dogbo / Grappe 1',
+        '11' => 'Agao / Grappe 1',
+        '12' => 'Akoba / Grappe 1',
     ];
     private const CLUSTER_FILENAMES = [
-        '1' => 'Djigbe_Grappe-1',  '2' => 'Djigbe_Grappe-2',
-        '3' => 'Gbonou_Grappe-1',  '4' => 'Gbonou_Grappe-2',  '5' => 'Gbonou_Grappe-3',
-        '6' => 'Miniffi_Grappe-1', '7' => 'Miniffi_Grappe-2', '8' => 'Miniffi_Grappe-3',
+        '1'  => 'Djigbe_Grappe-1',   '2'  => 'Djigbe_Grappe-2',
+        '3'  => 'Gbonou_Grappe-1',   '4'  => 'Gbonou_Grappe-2',   '5'  => 'Gbonou_Grappe-3',
+        '6'  => 'Miniffi_Grappe-1',  '7'  => 'Miniffi_Grappe-2',  '8'  => 'Miniffi_Grappe-3',
+        '9'  => 'Miniffi_Grappe-4',
+        '10' => 'Dogbo_Grappe-1',
+        '11' => 'Agao_Grappe-1',
+        '12' => 'Akoba_Grappe-1',
     ];
     private const COHORT_LABELS = ['1' => 'Cohorte A', '2' => 'Cohorte B'];
     private const VILLAGE_LABELS = [
-        'DJ' => 'Djigbe', '1' => 'Djigbe',
-        'GB' => 'Gbonou', '2' => 'Gbonou',
+        'DJ' => 'Djigbe',  '1' => 'Djigbe',
+        'GB' => 'Gbonou',  '2' => 'Gbonou',
         'MI' => 'Miniffi', '3' => 'Miniffi',
+        'DO' => 'Dogbo',
+        'AG' => 'Agao',
+        'AK' => 'Akoba',
     ];
 
     public function __construct(private RedCapService $redcap) {}
 
     public function index(): View
     {
-        return view('gps-export');
+        set_time_limit(120);
+        try {
+            $idRaw = $this->redcap->getIdentificationData();
+            $rows  = collect($idRaw)
+                ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+                ->unique('household_id');
+
+            $tablets = $rows->map(function ($r) {
+                    $p = explode('-', $r['household_id'] ?? '');
+                    return count($p) === 5 ? $p[3] : null;
+                })
+                ->filter()
+                ->unique()->sort()->values()->all();
+
+            $dags = $rows->pluck('redcap_data_access_group')
+                ->filter(fn($v) => $v !== '' && $v !== null)
+                ->unique()->sort()->values()->all();
+
+            $villages = $rows->pluck('village')
+                ->filter(fn($v) => $v !== '' && $v !== null)
+                ->unique()->sort()->values()->all();
+        } catch (\Throwable) {
+            $tablets  = [];
+            $dags     = [];
+            $villages = [];
+        }
+
+        return view('gps-export', compact('tablets', 'dags', 'villages'));
     }
 
     public function export(Request $request): \Illuminate\Http\Response|\Illuminate\Http\RedirectResponse
@@ -38,15 +76,16 @@ class GpsExportController extends Controller
         set_time_limit(300);
         $this->redcap->warmAll();
 
-        $selectedClusters = array_values(array_filter((array) $request->input('clusters', [])));
-        $selectedCohorts  = array_values(array_filter((array) $request->input('cohorts', [])));
-        $consentOnly      = $request->boolean('consent_only', true);
+        $groupBy         = in_array($request->input('group_by'), ['cluster', 'village', 'tablet', 'dag'])
+                           ? $request->input('group_by') : 'cluster';
+        $selectedItems   = array_values(array_filter((array) $request->input('selection', [])));
+        $selectedCohorts = array_values(array_filter((array) $request->input('cohorts', [])));
+        $consentOnly     = $request->boolean('consent_only', true);
 
         $idRaw     = $this->redcap->getIdentificationData();
         $qbRaw     = $this->redcap->getBaselineQuestionnaireData();
         $visiteRaw = $this->redcap->getVisiteData();
 
-        // Lookup tables keyed by household_id
         $qbByHh = collect($qbRaw)
             ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
             ->keyBy('household_id');
@@ -55,7 +94,6 @@ class GpsExportController extends Controller
             ->filter(fn($r) => $r['household_id'] !== '')
             ->keyBy('household_id');
 
-        // Build unified household list
         $households = collect($idRaw)
             ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
             ->unique('household_id')
@@ -63,7 +101,6 @@ class GpsExportController extends Controller
                 $qb     = $qbByHh->get($r['household_id'], []);
                 $visite = $visiteByHh->get($r['household_id'], []);
 
-                // GPS: identification form first, fallback to questionnaire_base
                 $lat = ($r['a_geo_latitude_id']   ?? '') ?: ($visite['a_geo_latitude_id']  ?? '') ?: ($qb['b_geo_latitude']  ?? '');
                 $lng = ($r['a_geo_longitude_id']  ?? '') ?: ($visite['a_geo_longitude_id'] ?? '') ?: ($qb['b_geo_longitude'] ?? '');
 
@@ -72,12 +109,18 @@ class GpsExportController extends Controller
                         ?: ($r['cluster_miniffi'] ?? '');
                 $consent = ($r['consent_accepted'] ?? '') ?: ($qb['consent_accepted'] ?? '');
 
+                $parts  = explode('-', $r['household_id'] ?? '');
+                $tablet = count($parts) === 5 ? $parts[3] : '';
+                $dag    = $r['redcap_data_access_group'] ?? '';
+
                 return [
                     'household_id' => $r['household_id'],
                     'lat'          => trim($lat),
                     'lng'          => trim($lng),
                     'village'      => $r['village'] ?? '',
                     'cluster'      => $cluster,
+                    'tablet'       => $tablet,
+                    'dag'          => $dag,
                     'cohort'       => $r['study_cohort'] ?? '',
                     'fullname'     => trim($qb['b_hhh_fullname'] ?? ''),
                     'address'      => trim($qb['b_hh_address']  ?? ''),
@@ -86,9 +129,8 @@ class GpsExportController extends Controller
             })
             ->filter(fn($r) => $r['lat'] !== '' && $r['lng'] !== '');
 
-        // Apply filters
-        if (!empty($selectedClusters)) {
-            $households = $households->filter(fn($r) => in_array($r['cluster'], $selectedClusters));
+        if (!empty($selectedItems)) {
+            $households = $households->filter(fn($r) => in_array($r[$groupBy], $selectedItems));
         }
         if (!empty($selectedCohorts)) {
             $households = $households->filter(fn($r) => in_array($r['cohort'], $selectedCohorts));
@@ -102,14 +144,13 @@ class GpsExportController extends Controller
                 ->with('error', 'Aucun ménage avec coordonnées GPS trouvé pour la sélection choisie.');
         }
 
-        $byCluster = $households->groupBy('cluster')->sortKeys();
+        $grouped = $households->groupBy($groupBy)->sortKeys();
 
-        // Single cluster → return one GPX file directly
-        if ($byCluster->count() === 1) {
-            $clusterKey = $byCluster->keys()->first();
-            $label      = self::CLUSTER_LABELS[$clusterKey] ?? "Grappe $clusterKey";
-            $gpx        = $this->buildGpx($byCluster->first(), $label);
-            $filename   = 'ENDURE-Net_' . (self::CLUSTER_FILENAMES[$clusterKey] ?? "Grappe-$clusterKey") . '_' . now()->format('Y-m-d') . '.gpx';
+        if ($grouped->count() === 1) {
+            $key      = $grouped->keys()->first();
+            $label    = $this->getGroupLabel($groupBy, $key);
+            $gpx      = $this->buildGpx($grouped->first(), $label);
+            $filename = $this->getGroupFilename($groupBy, $key) . '_' . now()->format('Y-m-d') . '.gpx';
 
             return response($gpx, 200, [
                 'Content-Type'        => 'application/gpx+xml; charset=UTF-8',
@@ -117,27 +158,48 @@ class GpsExportController extends Controller
             ]);
         }
 
-        // Multiple clusters → ZIP containing one GPX per cluster
         $tmpFile = tempnam(sys_get_temp_dir(), 'endure_gps_');
         $zip     = new ZipArchive();
         $zip->open($tmpFile, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
-        foreach ($byCluster as $clusterKey => $points) {
-            $label    = self::CLUSTER_LABELS[$clusterKey] ?? "Grappe $clusterKey";
+        foreach ($grouped as $key => $points) {
+            $label    = $this->getGroupLabel($groupBy, $key);
             $gpx      = $this->buildGpx($points, $label);
-            $filename = 'ENDURE-Net_' . (self::CLUSTER_FILENAMES[$clusterKey] ?? "Grappe-$clusterKey") . '.gpx';
+            $filename = $this->getGroupFilename($groupBy, $key) . '.gpx';
             $zip->addFromString($filename, $gpx);
         }
         $zip->close();
 
         $content     = file_get_contents($tmpFile);
         unlink($tmpFile);
-        $zipFilename = 'ENDURE-Net_GPS_' . now()->format('Y-m-d') . '.zip';
+        $suffix      = match($groupBy) { 'village' => 'Villages', 'tablet' => 'Tablettes', 'dag' => 'DAG', default => 'GPS' };
+        $zipFilename = 'ENDURE-Net_' . $suffix . '_' . now()->format('Y-m-d') . '.zip';
 
         return response($content, 200, [
             'Content-Type'        => 'application/zip',
             'Content-Disposition' => 'attachment; filename="' . $zipFilename . '"',
         ]);
+    }
+
+    private function getGroupLabel(string $groupBy, string $key): string
+    {
+        return match($groupBy) {
+            'cluster' => self::CLUSTER_LABELS[$key] ?? "Grappe $key",
+            'village' => self::VILLAGE_LABELS[$key] ?? $key,
+            'tablet'  => "Tablette $key",
+            default   => $key,
+        };
+    }
+
+    private function getGroupFilename(string $groupBy, string $key): string
+    {
+        $safe = preg_replace('/[^A-Za-z0-9_-]/', '-', $key);
+        return match($groupBy) {
+            'cluster' => 'ENDURE-Net_' . (self::CLUSTER_FILENAMES[$key] ?? "Grappe-$key"),
+            'village' => 'ENDURE-Net_' . (self::VILLAGE_LABELS[$key] ?? $safe),
+            'tablet'  => "ENDURE-Net_Tablette-$safe",
+            default   => "ENDURE-Net_$safe",
+        };
     }
 
     private function buildGpx(\Illuminate\Support\Collection $points, string $label): string
@@ -163,13 +225,14 @@ class GpsExportController extends Controller
             $lng    = number_format((float) $p['lng'], 7, '.', '');
             $name   = htmlspecialchars($p['household_id'], ENT_XML1, 'UTF-8');
 
-            $cohortLabel = self::COHORT_LABELS[$p['cohort']] ?? '';
+            $cohortLabel  = self::COHORT_LABELS[$p['cohort']] ?? '';
             $villageLabel = self::VILLAGE_LABELS[$p['village']] ?? $p['village'];
             $parts = array_filter([
                 $p['fullname'] !== '' ? 'Chef: ' . $p['fullname'] : '',
                 $cohortLabel,
                 $villageLabel !== '' ? 'Village: ' . $villageLabel : '',
                 $p['address']  !== '' ? 'Adresse: ' . $p['address'] : '',
+                $p['tablet']   !== '' ? 'Tablette: ' . $p['tablet'] : '',
             ]);
             $desc = htmlspecialchars(implode(' | ', $parts), ENT_XML1, 'UTF-8');
 

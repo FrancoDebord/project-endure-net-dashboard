@@ -146,6 +146,14 @@
                 </svg>
                 GPS
             </a>
+            <a href="{{ route('rapport.bras') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                </svg>
+                Rapport bras
+            </a>
             <a href="{{ route('inspections') }}"
                class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -497,6 +505,9 @@
                             <option>Djigbe</option>
                             <option>Gbonou</option>
                             <option>Miniffi</option>
+                            <option>Dogbo</option>
+                            <option>Agao</option>
+                            <option>Akoba</option>
                         </select>
                         <select id="filterHHGrappe" onchange="filterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
@@ -676,6 +687,9 @@
                                 <option>Djigbe</option>
                                 <option>Gbonou</option>
                                 <option>Miniffi</option>
+                                <option>Dogbo</option>
+                                <option>Agao</option>
+                                <option>Akoba</option>
                             </select>
                             <select id="filterNetsGrappe" onchange="filterNets()"
                                     class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">

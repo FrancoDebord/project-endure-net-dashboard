@@ -7,7 +7,7 @@
 
 @page {
     size: A4 landscape;
-    margin: 1.8cm 1.8cm 1.8cm 1.8cm;
+    margin: 2cm 2.5cm;
 }
 
 body {
