@@ -115,6 +115,8 @@ class InspectionController extends Controller
             ];
         })->sortByDesc('id')->values()->toArray();
 
+        $visualInspectionData = $this->buildVisualInspectionTable($submissions);
+
         return view('inspections', compact(
             'rows',
             'displayColumns',
@@ -125,6 +127,7 @@ class InspectionController extends Controller
             'brands',
             'brandCounts',
             'lieux',
+            'visualInspectionData',
         ) + ['brandLabels' => self::BRAND_LABELS, 'lots' => $lots, 'brandLots' => $brandLots]);
     }
 
@@ -168,6 +171,106 @@ class InspectionController extends Controller
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Read a field from a submission, trying the moustiquaires/ prefix first.
+     */
+    private function getField(array $s, string $key): ?string
+    {
+        // 1. Try the most common group prefix first
+        if (isset($s["moustiquaires/{$key}"]) && $s["moustiquaires/{$key}"] !== null && $s["moustiquaires/{$key}"] !== '') {
+            return (string)$s["moustiquaires/{$key}"];
+        }
+        // 2. Try bare key
+        if (isset($s[$key]) && $s[$key] !== null && $s[$key] !== '') {
+            return (string)$s[$key];
+        }
+        // 3. Fallback: scan all keys for any group prefix ending with /{key}
+        //    (handles group_xyz/etat_moustiquaire and similar patterns)
+        foreach ($s as $k => $v) {
+            if (str_ends_with($k, "/{$key}") && $v !== null && $v !== '') {
+                return (string)$v;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Aggregate submissions into the visual inspection table structure.
+     * Each row = one unique (brand × lot × bale × sampling_position) combination.
+     */
+    private function buildVisualInspectionTable(array $submissions): array
+    {
+        $table = ['PMD' => [], 'IG2' => []];
+
+        $groups = collect($submissions)
+            ->filter(fn($s) => in_array($this->getField($s, 'itn_brand'), ['PMD', 'IG2'], true))
+            ->groupBy(fn($s) => implode('|||', [
+                $this->getField($s, 'itn_brand')         ?? '',
+                $this->getField($s, 'lot_number')        ?? '',
+                $this->getField($s, 'numero_balle')      ?? '',
+                $this->getField($s, 'sampling_position') ?? '',
+            ]));
+
+        foreach ($groups as $key => $group) {
+            [$brand, $lot, $bale, $pos] = explode('|||', $key, 4);
+            if (!isset($table[$brand])) continue;
+
+            $total = $group->count();
+
+            // ── Fabric integrity (presence_trous + tailles) ──────────────────
+            $avecTrous = $group->filter(fn($s) => $this->getField($s, 'presence_trous') === '1')->count();
+            $fabric = [
+                'avec_trous' => $avecTrous,
+                'sans_trous' => $total - $avecTrous,
+                'taille1'    => $group->sum(fn($s) => (int)($this->getField($s, 'nb_taille1') ?? 0)),
+                'taille2'    => $group->sum(fn($s) => (int)($this->getField($s, 'nb_taille2') ?? 0)),
+                'taille3'    => $group->sum(fn($s) => (int)($this->getField($s, 'nb_taille3') ?? 0)),
+                'taille4'    => $group->sum(fn($s) => (int)($this->getField($s, 'nb_taille4') ?? 0)),
+            ];
+
+            // ── Colour (decoloration) ────────────────────────────────────────
+            $decolore = $group->filter(fn($s) => $this->getField($s, 'decoloration') === '1')->count();
+
+            // ── Symmetry: count each distinct value ──────────────────────────
+            $symmetry = $group
+                ->groupBy(fn($s) => $this->getField($s, 'symmetric') ?? '—')
+                ->map->count()
+                ->sortKeys()
+                ->toArray();
+
+            // ── Tache (presence_tache) ───────────────────────────────────────
+            $avecTache = $group->filter(fn($s) => $this->getField($s, 'presence_tache') === '1')->count();
+
+            // ── Overall damage (etat_moustiquaire 1–5) ───────────────────────
+            $overall = [];
+            for ($i = 1; $i <= 5; $i++) {
+                $code = (string)$i;
+                $overall[$i] = $group->filter(fn($s) => $this->getField($s, 'etat_moustiquaire') === $code)->count();
+            }
+
+            $table[$brand][] = [
+                'lot'      => $lot,
+                'bale'     => $bale,
+                'pos'      => $pos,
+                'total'    => $total,
+                'fabric'   => $fabric,
+                'colour'   => ['decolore' => $decolore, 'bon' => $total - $decolore],
+                'symmetry' => $symmetry,
+                'tache'    => ['avec' => $avecTache, 'sans' => $total - $avecTache],
+                'overall'  => $overall,
+            ];
+        }
+
+        // Sort each brand group by lot → bale → position
+        foreach (['PMD', 'IG2'] as $brand) {
+            usort($table[$brand], fn($a, $b) =>
+                [$a['lot'], $a['bale'], $a['pos']] <=> [$b['lot'], $b['bale'], $b['pos']]
+            );
+        }
+
+        return $table;
+    }
 
     private function resolveColumns(array $submissions): array
     {

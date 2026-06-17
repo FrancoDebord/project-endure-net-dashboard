@@ -13,9 +13,15 @@ class KoboToolboxService
 
     public function __construct()
     {
-        $this->apiUrl  = rtrim(config('kobotoolbox.api_url'), '/');
-        $this->token   = config('kobotoolbox.token');
-        $this->formUid = config('kobotoolbox.form_uid');
+        $this->apiUrl  = rtrim(config('services.kobotoolbox.api_url', 'https://kf.kobotoolbox.org/api/v2'), '/');
+        $this->token   = config('services.kobotoolbox.token')   ?? '';
+        $this->formUid = config('services.kobotoolbox.form_uid') ?? '';
+
+        if (empty($this->token) || empty($this->formUid)) {
+            throw new \RuntimeException(
+                'KoboToolbox non configuré : définissez KOBO_API_TOKEN et KOBO_FORM_UID dans votre fichier .env'
+            );
+        }
     }
 
     private function get(string $endpoint, array $params = []): mixed

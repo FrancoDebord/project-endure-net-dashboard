@@ -1,6 +1,6 @@
 # Documentation utilisateur — ENDURE-Net Dashboard
 
-**Version :** 1.1 · **Date :** Mai 2026  
+**Version :** 1.3 · **Date :** Juin 2026  
 **Projet :** AIRID / ENDURE-Net · Suivi MILDA, données REDCap & KoboToolbox
 
 ---
@@ -21,6 +21,7 @@
 12. [Actualisation du cache](#12-actualisation-du-cache)
 13. [Module Inspections physiques](#13-module-inspections-physiques)
 14. [Rapport d'exécution par bras](#14-rapport-dexécution-par-bras)
+15. [Gestion des erreurs et connectivité](#15-gestion-des-erreurs-et-connectivité)
 
 ---
 
@@ -37,11 +38,14 @@ Le tableau de bord ENDURE-Net est une application web de suivi des données de t
 
 **Zones géographiques couvertes :**
 
-| Village | Grappes |
-|---|---|
-| Djigbé | 1, 2 |
-| Gbônou | 3, 4, 5 |
-| Miniffi | 6, 7, 8 |
+| Village | Code | Grappes |
+|---|---|---|
+| Djigbé | DJ | 1, 2 |
+| Gbônou | GB | 3, 4, 5 |
+| Miniffi | MI | 6, 7, 8, 9 |
+| Dogbo | DO | 10 |
+| Agao | AG | 11 |
+| Akoba | AK | 12 |
 
 **Bras de l'étude :**
 - **Bras 1 (PERMANET DUAL)** — Grappes 1, 5, 7, 8
@@ -114,8 +118,8 @@ Cliquer sur le nom d'un onglet pour l'afficher. L'onglet actif est souligné en 
 
 En haut du tableau de bord, des filtres s'appliquent à l'ensemble des onglets :
 
-- **Village** : Djigbé / Gbônou / Miniffi / Tous
-- **Grappe** : 1 à 8 (filtrage par cluster)
+- **Village** : Djigbé / Gbônou / Miniffi / Dogbo / Agao / Akoba / Tous
+- **Grappe** : 1 à 12 (filtrage par cluster)
 - **Bras** : Bras 1 (PERMANET DUAL) / Bras 2 (INTERCEPTOR G2) / Tous
 
 > Les filtres Village et Bras sont liés : sélectionner un village filtre automatiquement les grappes correspondantes.
@@ -304,7 +308,7 @@ Chaque ligne représente une query avec :
 | Code | Sévérité | Description |
 |---|---|---|
 | Q-VIS-01 | Avertissement | Séquence de visites inattendue |
-| Q-ID-01 | Critique | Format de l'identifiant ménage invalide |
+| Q-ID-01 | Critique | Format de l'identifiant ménage invalide (format attendu : `CODE_VILLAGE-GRAPPE-BRAS-TABLETTE-MENAGE`, ex. `MI-03-PD-01-024` ; codes villages : DJ/GB/MI/DO/AG/AK) |
 | Q-ID-02 | Avertissement | Incohérence entre ID ménage et village |
 | Q-ID-03 | Avertissement | Incohérence entre ID ménage et grappe |
 | Q-ID-04 | Avertissement | Incohérence entre ID ménage et bras |
@@ -358,42 +362,64 @@ Pour chaque ménage exporté, le fichier GPX contient :
 - Cohorte (A ou B)
 - Village
 - Adresse / repère
+- Numéro de tablette
 
 ### 10.3 Utilisation
 
-#### Étape 1 — Sélectionner les grappes
+#### Étape 1 — Choisir le mode de regroupement
 
-Les grappes sont organisées par village :
-- **Djigbé** : Grappes 1, 2
-- **Gbônou** : Grappes 3, 4, 5
-- **Miniffi** : Grappes 6, 7, 8
+Quatre modes de regroupement sont disponibles. Le mode choisi détermine comment les fichiers GPX seront organisés :
 
-Cocher les grappes souhaitées. Les boutons **"Tout cocher"** / **"Tout décocher"** permettent une sélection rapide.
+| Mode | Description | Fichiers générés |
+|---|---|---|
+| **Par Grappe** *(défaut)* | Un fichier GPX par grappe sélectionnée | `ENDURE-Net_Djigbe_Grappe-1.gpx`, … |
+| **Par Village** | Un fichier GPX par village | `ENDURE-Net_Djigbe.gpx`, … |
+| **Par Tablette** | Un fichier GPX par binôme (tablette) | `ENDURE-Net_Tablette-01.gpx`, … |
+| **Par DAG** | Un fichier GPX par Data Access Group REDCap | `ENDURE-Net_<dag>.gpx` |
 
-#### Étape 2 — Filtrer par cohorte (optionnel)
+> Si une seule unité est sélectionnée, un fichier `.gpx` unique est téléchargé directement. Pour plusieurs unités, une archive `.zip` est générée.
+
+#### Étape 2 — Sélectionner les éléments à exporter
+
+La liste de sélection s'adapte automatiquement au mode de regroupement choisi :
+
+- **Par Grappe** : les grappes sont organisées par village :
+  - **Djigbé** : Grappes 1, 2
+  - **Gbônou** : Grappes 3, 4, 5
+  - **Miniffi** : Grappes 6, 7, 8, 9
+  - **Dogbo** : Grappe 10
+  - **Agao** : Grappe 11
+  - **Akoba** : Grappe 12
+- **Par Village** : liste des villages présents dans les données REDCap
+- **Par Tablette** : liste des tablettes détectées dans les identifiants ménage
+- **Par DAG** : liste des Data Access Groups REDCap
+
+Les boutons **"Tout cocher"** / **"Tout décocher"** permettent une sélection rapide.
+
+#### Étape 3 — Filtrer par cohorte (optionnel)
 
 - **Toutes** : exporte les cohortes A et B
 - **Cohorte A** : uniquement les ménages en cohorte A
 - **Cohorte B** : uniquement les ménages en cohorte B
 
-#### Étape 3 — Filtrer par consentement
+#### Étape 4 — Filtrer par consentement
 
 - **Consentis uniquement** *(recommandé)* : n'exporte que les ménages ayant donné leur consentement
 - **Tous avec GPS valide** : exporte tous les ménages avec des coordonnées GPS, qu'ils aient consenti ou non
 
-#### Étape 4 — Télécharger
+#### Étape 5 — Télécharger
 
 Cliquer sur **"Télécharger GPX"**.
 
-- Si **une seule grappe** est sélectionnée : téléchargement d'un fichier `.gpx` unique.
-- Si **plusieurs grappes** sont sélectionnées : téléchargement d'une archive `.zip` contenant un fichier `.gpx` par grappe.
+- **Une seule unité** sélectionnée → fichier `.gpx` unique.
+- **Plusieurs unités** → archive `.zip` contenant un fichier `.gpx` par unité.
 
 ### 10.4 Importer dans OsmAnd
 
 1. Transférer le(s) fichier(s) `.gpx` sur le téléphone (via câble, email, ou cloud).
 2. Dans OsmAnd : **Menu → Mes lieux → Traces → Importer**.
 3. Sélectionner le fichier `.gpx`.
-4. Les ménages apparaissent comme waypoints sur la carte avec leurs informations.
+4. Les ménages apparaissent comme waypoints sur la carte avec leurs informations (nom du chef, cohorte, village, adresse, tablette).
 
 ---
 
@@ -503,6 +529,16 @@ Le tableau affiche toutes les inspections avec les colonnes suivantes (entêtes 
 | `remarque` | Remarques de l'enquêteur |
 | `presence` | Présence de la moustiquaire |
 
+#### Pagination du tableau
+
+Le tableau est paginé pour optimiser la lisibilité. Un bandeau en bas du tableau permet de :
+
+- **Choisir le nombre de lignes par page** : 25 / 50 / 100 / 200 / Tout afficher
+- **Naviguer** entre les pages avec les boutons **←** et **→**
+- **Connaître la position exacte** : indicateur *"X–Y sur Z soumissions"* et *"Page N / N"*
+
+> La pagination se réinitialise automatiquement à la page 1 à chaque changement de filtre.
+
 ### 13.6 Export CSV
 
 > Cette fonctionnalité est **réservée à l'administrateur** (`francis.houeha@airid-africa.com`).
@@ -515,6 +551,91 @@ Le bouton **"Export CSV"** génère un fichier CSV (séparateur `;`, encodage UT
 ### 13.7 Actualisation du cache
 
 Le bouton **"Actualiser"** vide le cache KoboToolbox (durée : 30 minutes) et recharge les données depuis l'API. L'opération peut prendre quelques secondes.
+
+### 13.8 Fiche d'inspection visuelle — contrôle qualité
+
+Le bouton **"Fiche inspection"** (vert, en haut à droite) ouvre une fenêtre modale affichant le tableau standardisé de contrôle qualité visuel (Section 16.1.3 du protocole ENDURE-Net).
+
+#### Structure du tableau
+
+Le tableau est organisé en deux sections :
+
+| Section | Marque | Rôle dans l'étude |
+|---|---|---|
+| **Test product** | PermaNet Dual (PMD) | Produit testé |
+| **Reference product** | Interceptor G2 (IG2) | Produit de référence |
+
+Chaque ligne correspond à une **combinaison unique** de : lot × balle × position de prélèvement.
+
+#### Colonnes du tableau
+
+| Colonne | Variable source | Description |
+|---|---|---|
+| **Lot number** | `lot_number` | Numéro de lot de la moustiquaire |
+| **Bale number** | `numero_balle` | Numéro de balle |
+| **Sampling position** | `sampling_position` | Position de prélèvement dans la balle |
+| **Fabric integrity** | `presence_trous`, `nb_taille1–4` | Nombre de moustiquaires intactes / avec trous, ventilé par taille (T1–T4) |
+| **Colour** | `decoloration` | Nombre avec bonne intensité (0) / décolorées (1) |
+| **Symmetry** | `symmetric` | Comptage de chaque modalité distincte |
+| **Tache** | `presence_tache` | Nombre avec (1) / sans (0) tache |
+| **Overall damage present?** | `etat_moustiquaire` | Distribution des 5 grades : 1-Excellent · 2-Bon · 3-Moyen · 4-Médiocre · 5-Inacceptable (toujours affiché, les grades à 0 sont grisés) |
+
+Le **pied de tableau** indique le nombre total de moustiquaires inspectées par bras (n PMD / n IG2).
+
+#### Code couleur des cellules
+
+- **Vert** : valeur satisfaisante (intacte, bonne couleur, sans tache)
+- **Rouge** : défaut détecté (présence de trous)
+- **Orange** : anomalie modérée (décoloration, tache)
+- **Grisé (opacité réduite)** : modalité absente dans le groupe (compte = 0)
+
+#### Impression / Export PDF de la fiche
+
+Le bouton **"Imprimer / Exporter PDF"** dans l'en-tête de la fenêtre ouvre une nouvelle fenêtre avec le tableau rempli formaté pour l'impression en **A4 paysage**, puis déclenche automatiquement le dialogue d'impression du navigateur. Depuis ce dialogue, sélectionner **"Enregistrer en PDF"** pour obtenir le fichier.
+
+---
+
+### 13.9 Graphiques comparatifs PMD vs IG2
+
+La section **"Analyse comparative — PMD vs IG2"**, placée entre les cartes de marque et les filtres, présente 6 graphiques côte à côte résumant les résultats des inspections par bras.
+
+#### Graphiques disponibles
+
+| # | Titre | Type | Ce qu'il montre |
+|---|---|---|---|
+| 1 | **Intégrité du tissu** | Barres groupées | Nombre de moustiquaires intactes vs avec trous |
+| 2 | **Trous par taille** | Barres groupées | Nombre cumulé de trous par catégorie (T1 / T2 / T3 / T4) |
+| 3 | **Couleur** | Barres groupées | Nombre avec bonne intensité vs décolorées |
+| 4 | **Symétrie** | Barres groupées | Comptage de chaque modalité de symétrie |
+| 5 | **Présence de tache** | Barres groupées | Nombre sans tache vs avec tache |
+| 6 | **État général (1–5)** | Barres empilées horizontales 100 % | Distribution des grades 1 à 5 par bras, normalisée en pourcentage |
+
+- **PMD (PermaNet Dual)** = violet · **IG2 (Interceptor G2)** = bleu ciel
+- Le **survol d'une barre** affiche le compte brut et le pourcentage correspondant
+- Le graphique "État général" est **normalisé à 100 %** : les deux barres occupent toute la largeur, permettant de comparer la distribution de sévérité quel que soit le nombre total de moustiquaires
+
+#### Interprétation automatique
+
+Sous chaque graphique, une courte interprétation en français est générée automatiquement à partir des données réelles. Elle indique :
+- Les pourcentages clés pour chaque bras
+- Le bras le plus affecté (si différence significative)
+- Un constat neutre en l'absence d'anomalies
+
+#### Réduire / Développer
+
+Le bouton **"Réduire / Développer"** (en haut à droite de la section) permet de masquer les graphiques pour libérer de l'espace à l'écran. La section est masquée à l'impression de la page.
+
+---
+
+### 13.10 Impression des graphiques comparatifs
+
+Le bouton **"Imprimer les graphiques"** (vert, en haut à droite de la section graphiques) génère une page d'impression dédiée contenant :
+
+- **En-tête** : titre de l'analyse + date de génération automatique
+- **Grille 3 × 2** : les 6 graphiques au format image (PNG haute résolution)
+- **Interprétation** sous chaque graphique, dans un encadré gris avec bordure teal
+
+Le format de sortie est **A4 paysage**. La fenêtre d'impression s'ouvre automatiquement — sélectionner **"Enregistrer en PDF"** pour exporter.
 
 ---
 
@@ -590,4 +711,41 @@ Le bouton **"Télécharger PDF"** dans la bannière génère directement un fich
 
 ---
 
-*Documentation générée pour AIRID — ENDURE-Net · Mai 2026 · v1.1*
+---
+
+## 15. Gestion des erreurs et connectivité
+
+Le dashboard dispose de pages d'erreur personnalisées qui s'affichent automatiquement en cas de problème serveur ou réseau.
+
+### 15.1 Pages d'erreur
+
+| Code | Page affichée | Cause typique |
+|---|---|---|
+| **500** | Erreur serveur / Base de données inaccessible | Serveur MySQL injoignable, panne serveur |
+| **503** | Service momentanément indisponible | Maintenance programmée, surcharge temporaire |
+| **404** | Page introuvable | URL incorrecte, page supprimée |
+| **419** | Session expirée | Inactivité prolongée, jeton CSRF expiré |
+
+Chaque page inclut :
+- Un **icône animé** représentant le type d'erreur
+- Un **message clair en français** avec la cause probable
+- Des **boutons d'action** adaptés : Réessayer, Retour à l'accueil, Se reconnecter
+- Un **lien de contact** vers le support (`support@airid-africa.com`)
+
+### 15.2 Page erreur 500 — spécificités
+
+Lorsque la base de données MySQL est inaccessible (erreur `SQLSTATE`), la page 500 :
+- Détecte automatiquement qu'il s'agit d'une **erreur de base de données** et adapte le message
+- Affiche un **compte à rebours de 30 secondes** avant rechargement automatique
+- Montre deux chips de statut : **MySQL** (état de la connexion DB) et **Réseau** (état de la connexion Internet)
+- En mode debug (`APP_DEBUG=true`) : un accordéon **"Détails techniques"** affiche le type d'exception et le message brut
+
+### 15.3 Détection de la connectivité Internet
+
+Sur toutes les pages d'erreur, une **bannière orange** apparaît automatiquement en haut de l'écran si la connexion Internet est perdue (`navigator.onLine = false`). Elle disparaît dès que la connexion est rétablie.
+
+> Cette détection est en temps réel : si votre connexion tombe pendant la navigation, la bannière s'affiche sans rechargement de page.
+
+---
+
+*Documentation générée pour AIRID — ENDURE-Net · Juin 2026 · v1.3*

@@ -172,6 +172,27 @@ class RedCapService
         );
     }
 
+    // Chef de ménage, contact, moment de visite et adresse (Form 1b Questionnaire Base Ménage)
+    public function getForm1bData(): array
+    {
+        return Cache::remember('redcap.form1b', now()->addMinutes(30), fn() =>
+            $this->request([
+                'content' => 'record', 'type' => 'flat',
+                'events'  => 'baseline_et_distri_arm_1',
+                'forms'   => 'form_1b_questionnaire_base_menage',
+                'fields'  => implode(',', [
+                    'household_id',
+                    'b_hhh_fullname',          // Nom du chef de ménage
+                    'b_hhh_phone',             // Téléphone du chef de ménage
+                    'b_hh_point_contact',      // Nom du point de contact
+                    'b_hh_point_contact_phone',// Téléphone du point de contact
+                    'b_hh_moment_visite',      // Meilleur moment pour visiter
+                    'b_hh_address',            // Adresse du ménage
+                ]),
+            ])
+        );
+    }
+
     // ── User Acceptability ───────────────────────────────────────────────────
 
     public function getUserAcceptabilityData(string $event = 'user_acceptability_arm_1'): array
@@ -183,6 +204,7 @@ class RedCapService
                 'forms'   => 'form_6_user_acceptability',
                 'fields'  => implode(',', [
                     'household_id',
+                    'ac_tablet', 'ac_date_interview',
                     'net_like', 'net_overall_satisfaction',
                     'net_continue_use', 'net_recommend',
                     'net_easy_use', 'net_size_adequate',
@@ -204,7 +226,7 @@ class RedCapService
                 'events'  => 'adverse_events_arm_1',
                 'forms'   => 'form_5a_informations_gnriques_adverse_events,form_5_adverse_avents',
                 'fields'  => implode(',', [
-                    'household_id', 'ad_evt_date', 'tablet_code',
+                    'household_id', 'ad_evt_date', 'ae_tablette_id',
                     // form_5a — ménage
                     'bedbugs_community_problem', 'bedbugs_current_house',
                     'bb_seen_on_net_ever', 'bb_stop_net_use_ever',
@@ -267,6 +289,7 @@ class RedCapService
 
         $uaFields = implode(',', [
             'household_id',
+            'ac_tablet', 'ac_date_interview',
             'net_like', 'net_overall_satisfaction',
             'net_continue_use', 'net_recommend',
             'net_easy_use', 'net_size_adequate',
@@ -324,11 +347,17 @@ class RedCapService
                  'fields'=>implode(',',['household_id','nb_moustiquaires_etude'])],
                 $t30,
             ],
+            'form1b' => [
+                'redcap.form1b',
+                ['content'=>'record','type'=>'flat','events'=>'baseline_et_distri_arm_1','forms'=>'form_1b_questionnaire_base_menage',
+                 'fields'=>implode(',',['household_id','b_hhh_fullname','b_hhh_phone','b_hh_point_contact','b_hh_point_contact_phone','b_hh_moment_visite','b_hh_address'])],
+                $t30,
+            ],
             'adverse_events' => [
                 'redcap.adverse_events',
                 ['content'=>'record','type'=>'flat','events'=>'adverse_events_arm_1',
                  'forms'=>'form_5a_informations_gnriques_adverse_events,form_5_adverse_avents',
-                 'fields'=>implode(',',['household_id','ad_evt_date','tablet_code','bedbugs_community_problem','bedbugs_current_house','bb_seen_on_net_ever','bb_stop_net_use_ever','ae_any_symptom','ae_itch_adult','ae_faceburn_adult','ae_sneeze_adult','ae_rhinorrhea_adult','ae_headache_adult','ae_nausea_adult','ae_eyeirrit_adult','ae_tearing_adult','ae_badsmell_adult','itn_continue_use'])],
+                 'fields'=>implode(',',['household_id','ad_evt_date','ae_tablette_id','bedbugs_community_problem','bedbugs_current_house','bb_seen_on_net_ever','bb_stop_net_use_ever','ae_any_symptom','ae_itch_adult','ae_faceburn_adult','ae_sneeze_adult','ae_rhinorrhea_adult','ae_headache_adult','ae_nausea_adult','ae_eyeirrit_adult','ae_tearing_adult','ae_badsmell_adult','itn_continue_use'])],
                 $t30,
             ],
             'ua_baseline' => [

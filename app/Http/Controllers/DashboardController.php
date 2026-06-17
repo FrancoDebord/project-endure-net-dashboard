@@ -6,36 +6,27 @@ use App\Services\RedCapService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
     private const CLUSTER_LABELS = [
-        '1'  => 'Djigbe / Grappe 1',  '2'  => 'Djigbe / Grappe 2',
-        '3'  => 'Gbonou / Grappe 1',  '4'  => 'Gbonou / Grappe 2',  '5'  => 'Gbonou / Grappe 3',
-        '6'  => 'Miniffi / Grappe 1', '7'  => 'Miniffi / Grappe 2', '8'  => 'Miniffi / Grappe 3',
-        '9'  => 'Miniffi / Grappe 4',
-        '10' => 'Dogbo / Grappe 1',
-        '11' => 'Agao / Grappe 1',
-        '12' => 'Akoba / Grappe 1',
+        '1' => 'Djigbe / Grappe 1', '2' => 'Djigbe / Grappe 2',
+        '3' => 'Gbonou / Grappe 1', '4' => 'Gbonou / Grappe 2', '5' => 'Gbonou / Grappe 3',
+        '6' => 'Miniffi / Grappe 1','7' => 'Miniffi / Grappe 2','8' => 'Miniffi / Grappe 3',
     ];
     // Mapping (village, grappe) → cluster key, derived from household ID format
     private const CLUSTER_FROM_ID = [
-        'DJ' => ['01' => '1',  '02' => '2'],
-        'GB' => ['01' => '3',  '02' => '4',  '03' => '5'],
-        'MI' => ['01' => '6',  '02' => '7',  '03' => '8', '04' => '9'],
-        'DO' => ['01' => '10'],
-        'AG' => ['01' => '11'],
-        'AK' => ['01' => '12'],
+        'DJ' => ['01' => '1', '02' => '2'],
+        'GB' => ['01' => '3', '02' => '4', '03' => '5'],
+        'MI' => ['01' => '6', '02' => '7', '03' => '8'],
     ];
     // Accepte les codes numériques (1/2/3) et alphanumériques (DJ/GB/MI) selon export REDCap
     private const VILLAGE_LABELS = [
-        'DJ' => 'Djigbe',  '1' => 'Djigbe',
-        'GB' => 'Gbonou',  '2' => 'Gbonou',
+        'DJ' => 'Djigbe', '1' => 'Djigbe',
+        'GB' => 'Gbonou', '2' => 'Gbonou',
         'MI' => 'Miniffi', '3' => 'Miniffi',
-        'DO' => 'Dogbo',
-        'AG' => 'Agao',
-        'AK' => 'Akoba',
     ];
     private const BRAS_LABELS = ['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'];
     // Cluster global (1-8) → bras : PD si cluster ∈ {1,5,7,8}, G2 si ∈ {2,3,4,6}
@@ -70,8 +61,8 @@ class DashboardController extends Controller
         $village = strtoupper($village);
         $bras    = strtoupper($bras);
 
-        $valid = in_array($village, ['DJ', 'GB', 'MI', 'DO', 'AG', 'AK'])
-              && preg_match('/^0[1-9]$/', $grappe)
+        $valid = in_array($village, ['DJ', 'GB', 'MI'])
+              && preg_match('/^0[1-3]$/', $grappe)
               && in_array($bras, ['PD', 'G2'])
               && preg_match('/^(0[1-9]|1[0-9]|20)$/', $tablette)
               && preg_match('/^\d{3}$/', $menage)
@@ -109,16 +100,6 @@ class DashboardController extends Controller
         return self::CLUSTER_FROM_ID[$p['village']][$p['grappe']] ?? '';
     }
 
-    private static function netStatus(int $total, int $members): string
-    {
-        if ($members <= 0) return 'unknown';
-        $min = (int) ceil($members / 3);
-        $max = min(5, (int) ceil($members / 2));
-        if ($total < $min) return 'low';
-        if ($total > $max) return 'high';
-        return 'ok';
-    }
-
     private const EVENTS = [
         'baseline' => ['key' => 'baseline', 'label' => 'Baseline & Distribution', 'icon' => '📋', 'event' => 'baseline_et_distri_arm_1'],
         'ua'       => ['key' => 'ua',       'label' => 'User Acceptability',      'icon' => '✅', 'event' => 'user_acceptability_arm_1'],
@@ -131,70 +112,107 @@ class DashboardController extends Controller
 
     public function index(): View
     {
-        set_time_limit(300);
+        $cacheWarm = Cache::has('redcap.identification') && Cache::has('redcap.study_nets');
 
-        // Fire all REDCap API calls concurrently; get*() methods below read from cache.
+        // Cache froid → squelette (JS lance warmAll puis recharge)
+        if (!$cacheWarm) {
+            return view('dashboard-skeleton', [
+                'projectInfo' => Cache::get('redcap.project_info', ['project_title' => 'ENDURE-Net Dashboard']),
+                'events'      => self::EVENTS,
+            ]);
+        }
+
+        // Cache chaud → shell immédiat, chaque onglet se charge en background via JS
+        return view('dashboard-shell', [
+            'projectInfo' => $this->redcap->getProjectInfo(),
+            'events'      => self::EVENTS,
+        ]);
+    }
+
+    // POST /dashboard/warm — préchauffage du cache REDCap en arrière-plan
+    public function warmCache(): \Illuminate\Http\JsonResponse
+    {
+        set_time_limit(180);
+        try {
+            $this->redcap->warmAll();
+            return response()->json(['done' => true]);
+        } catch (\Exception $e) {
+            return response()->json(['done' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function section(Request $request, string $tab): \Illuminate\Http\Response
+    {
+        set_time_limit(300);
         $this->redcap->warmAll();
 
-        // ════════════════════════════════
-        // BASELINE DATA
-        // ════════════════════════════════
         $visiteRaw   = $this->redcap->getVisiteData();
         $idRaw       = $this->redcap->getIdentificationData();
         $qbRaw       = $this->redcap->getBaselineQuestionnaireData();
-        $memberRaw   = $this->redcap->getMemberData();
-        $oldNetRaw   = $this->redcap->getOldNetData();
-        $studyNetRaw = $this->redcap->getStudyNetData();
-
-        $visits = $this->buildVisits($visiteRaw, $idRaw, $qbRaw);
-
-        $baseline = $this->buildBaselineData($visits, $qbRaw, $memberRaw, $oldNetRaw, $studyNetRaw, $idRaw);
-
-        // ════════════════════════════════
-        // USER ACCEPTABILITY
-        // ════════════════════════════════
-        $uaRaw  = $this->redcap->getUserAcceptabilityData('user_acceptability_arm_1');
-        $ua24Raw = $this->redcap->getUserAcceptabilityData('suivi_24_mois_arm_1');
-        $ua  = $this->buildUAData($uaRaw, $visits);
-        $ua24 = $this->buildUAData($ua24Raw, $visits);
-
-        // ════════════════════════════════
-        // ADVERSE EVENTS
-        // ════════════════════════════════
-        $aeRaw = $this->redcap->getAdverseEventsData();
-        $ae    = $this->buildAEData($aeRaw, $visits);
-
-        // ════════════════════════════════
-        // FOLLOW-UP (6, 12, 18, 24, 36 mois)
-        // ════════════════════════════════
-        $followUpEvents = [
-            'suivi6'  => 'suivi_6_mois_arm_1',  'suivi12' => 'suivi_12_mois_arm_1',
-            'suivi18' => 'suivi_18_mois_coho_arm_1', 'suivi24' => 'suivi_24_mois_arm_1',
-            'suivi36' => 'suivi_36_mois_arm_1',
-        ];
-        $followUp = [];
-        foreach ($followUpEvents as $key => $event) {
-            $raw = $this->redcap->getFollowUpData($event);
-            $followUp[$key] = $this->buildFollowUpData($raw, $visits);
-        }
+        $visits      = $this->buildVisits($visiteRaw, $idRaw, $qbRaw);
 
         $reportTablets = collect($visiteRaw)
             ->filter(fn($r) => ($r['a_tablette_id'] ?? '') !== '')
             ->pluck('a_tablette_id')->unique()->sort()->values();
 
-        $performanceChart = $this->buildPerformanceChartData($visiteRaw, $idRaw, $qbRaw);
-
-        return view('dashboard', [
+        $data = [
             'events'          => self::EVENTS,
-            'baseline'        => $baseline,
-            'ua'              => $ua,
-            'ua24'            => $ua24,
-            'ae'              => $ae,
-            'followUp'        => $followUp,
             'projectInfo'     => $this->redcap->getProjectInfo(),
             'reportTablets'   => $reportTablets,
-            'performanceChart'=> $performanceChart,
-        ]);
+            'renderSection'   => $tab,
+            // Provide safe defaults for variables used by other tabs
+            'baseline'        => [],
+            'ua'              => [],
+            'ua24'            => [],
+            'ae'              => [],
+            'followUp'        => [],
+            'performanceChart'=> ['labels' => [], 'datasets' => []],
+        ];
+
+        switch ($tab) {
+            case 'baseline':
+            case 'rapport':
+            case 'distribution':
+                $memberRaw   = $this->redcap->getMemberData();
+                $oldNetRaw   = $this->redcap->getOldNetData();
+                $studyNetRaw = $this->redcap->getStudyNetData();
+                $data['baseline']         = $this->buildBaselineData($visits, $qbRaw, $memberRaw, $oldNetRaw, $studyNetRaw, $idRaw);
+                $data['performanceChart'] = $this->buildPerformanceChartData($visiteRaw, $idRaw, $qbRaw);
+                break;
+
+            case 'ua':
+                $uaRaw   = $this->redcap->getUserAcceptabilityData('user_acceptability_arm_1');
+                $ua24Raw = $this->redcap->getUserAcceptabilityData('suivi_24_mois_arm_1');
+                $data['ua']   = $this->buildUAData($uaRaw, $visits);
+                $data['ua24'] = $this->buildUAData($ua24Raw, $visits);
+                break;
+
+            case 'ae':
+                $aeRaw      = $this->redcap->getAdverseEventsData();
+                $data['ae'] = $this->buildAEData($aeRaw, $visits);
+                break;
+
+            case 'followup':
+            case 'suivi_a':
+            case 'suivi':
+                $followUpEvents = [
+                    'suivi6'  => 'suivi_6_mois_arm_1',
+                    'suivi12' => 'suivi_12_mois_arm_1',
+                    'suivi18' => 'suivi_18_mois_coho_arm_1',
+                    'suivi24' => 'suivi_24_mois_arm_1',
+                    'suivi36' => 'suivi_36_mois_arm_1',
+                ];
+                $followUp = [];
+                foreach ($followUpEvents as $key => $event) {
+                    $raw = $this->redcap->getFollowUpData($event);
+                    $followUp[$key] = $this->buildFollowUpData($raw, $visits);
+                }
+                $data['followUp'] = $followUp;
+                break;
+        }
+
+        $html = view('dashboard', $data)->render();
+        return response()->make($html, 200, ['Content-Type' => 'text/html']);
     }
 
     public function exportRapportPdf(Request $request): \Illuminate\Http\Response
@@ -416,7 +434,6 @@ class DashboardController extends Controller
         $idRaw       = $this->redcap->getIdentificationData();
         $qbRaw       = $this->redcap->getBaselineQuestionnaireData();
         $studyNetRaw = $this->redcap->getStudyNetData();
-        $memberRaw   = $this->redcap->getMemberData();
 
         $qbByHh = collect($qbRaw)
             ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
@@ -431,14 +448,6 @@ class DashboardController extends Controller
             })
             ->where('consent_accepted', '1')
             ->pluck('household_id')->flip();
-
-        $membersByHh = collect($memberRaw)
-            ->filter(fn($r) =>
-                $r['household_id'] !== '' &&
-                ($r['redcap_repeat_instrument'] ?? '') === 'section_1_membres_du_mnage' &&
-                $r['redcap_repeat_instance'] !== ''
-            )
-            ->groupBy('household_id')->map->count();
 
         $visitDataByHh = collect($visiteRaw)
             ->filter(fn($r) => $r['household_id'] !== '')
@@ -486,34 +495,21 @@ class DashboardController extends Controller
         $netsByTablet = $nets
             ->filter(fn($r) => $r['tablette'] !== '')
             ->groupBy('tablette')->sortKeys()
-            ->map(function ($tNets, $tablet) use ($visitStatsByTablet, $membersByHh) {
-                $households = $tNets->groupBy('household_id')->sortKeys()
-                    ->map(function ($hhNets, $hhId) use ($membersByHh) {
-                        $members = $membersByHh->get($hhId, 0);
-                        return [
-                            'household_id' => $hhId,
-                            'date_visit'   => $hhNets->first()['date_visit'],
-                            'nets'         => $hhNets->pluck('net_code')->values(),
-                            'total'        => $hhNets->count(),
-                            'bras'         => $hhNets->first()['bras'],
-                            'cohort'       => $hhNets->first()['cohort'],
-                            'members'      => $members,
-                            'net_min'      => $members > 0 ? (int) ceil($members / 3) : 0,
-                            'net_max'      => $members > 0 ? min(5, (int) ceil($members / 2)) : 5,
-                            'net_status'   => self::netStatus($hhNets->count(), $members),
-                        ];
-                    })->values();
-                return [
-                    'tablet'    => $tablet,
-                    'visited'   => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
-                    'consented' => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
-                    'households'=> $households,
-                    'total'     => $tNets->count(),
-                    'net_low'   => $households->where('net_status', 'low')->count(),
-                    'net_high'  => $households->where('net_status', 'high')->count(),
-                    'net_ok'    => $households->where('net_status', 'ok')->count(),
-                ];
-            })->values();
+            ->map(fn($tNets, $tablet) => [
+                'tablet'     => $tablet,
+                'visited'    => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['visited'],
+                'consented'  => $visitStatsByTablet->get($tablet, ['visited' => 0, 'consented' => 0])['consented'],
+                'households' => $tNets->groupBy('household_id')->sortKeys()
+                    ->map(fn($hhNets, $hhId) => [
+                        'household_id' => $hhId,
+                        'date_visit'   => $hhNets->first()['date_visit'],
+                        'nets'         => $hhNets->pluck('net_code')->values(),
+                        'total'        => $hhNets->count(),
+                        'bras'         => $hhNets->first()['bras'],
+                        'cohort'       => $hhNets->first()['cohort'],
+                    ])->values(),
+                'total' => $tNets->count(),
+            ])->values();
 
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('distribution-pdf', compact(
             'netsByTablet', 'dateFrom', 'dateTo', 'tablets'
@@ -898,34 +894,21 @@ class DashboardController extends Controller
         $netsByTablet = $studyNetsDetail
             ->filter(fn($r) => $r['tablette'] !== '')
             ->groupBy('tablette')->sortKeys()
-            ->map(function ($tNets, $tablet) use ($visitsByTablet, $membersByHh) {
-                $households = $tNets->groupBy('household_id')->sortKeys()
-                    ->map(function ($hhNets, $hhId) use ($membersByHh) {
-                        $members = $membersByHh->get($hhId, 0);
-                        return [
-                            'household_id' => $hhId,
-                            'date_visit'   => $hhNets->first()['date_visit'],
-                            'nets'         => $hhNets->pluck('net_code')->values(),
-                            'total'        => $hhNets->count(),
-                            'bras'         => $hhNets->first()['bras'],
-                            'cohort'       => $hhNets->first()['cohort'],
-                            'members'      => $members,
-                            'net_min'      => $members > 0 ? (int) ceil($members / 3) : 0,
-                            'net_max'      => $members > 0 ? min(5, (int) ceil($members / 2)) : 5,
-                            'net_status'   => self::netStatus($hhNets->count(), $members),
-                        ];
-                    })->values();
-                return [
-                    'tablet'    => $tablet,
-                    'visited'   => $visitsByTablet->get($tablet, collect())->count(),
-                    'consented' => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
-                    'households'=> $households,
-                    'total'     => $tNets->count(),
-                    'net_low'   => $households->where('net_status', 'low')->count(),
-                    'net_high'  => $households->where('net_status', 'high')->count(),
-                    'net_ok'    => $households->where('net_status', 'ok')->count(),
-                ];
-            })->values();
+            ->map(fn($tNets, $tablet) => [
+                'tablet'     => $tablet,
+                'visited'    => $visitsByTablet->get($tablet, collect())->count(),
+                'consented'  => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
+                'households' => $tNets->groupBy('household_id')->sortKeys()
+                    ->map(fn($hhNets, $hhId) => [
+                        'household_id' => $hhId,
+                        'date_visit'   => $hhNets->first()['date_visit'],
+                        'nets'         => $hhNets->pluck('net_code')->values(),
+                        'total'        => $hhNets->count(),
+                        'bras'         => $hhNets->first()['bras'],
+                        'cohort'       => $hhNets->first()['cohort'],
+                    ])->values(),
+                'total' => $tNets->count(),
+            ])->values();
 
         $householdDetails = $allHouseholds->map(function ($hh) use ($qb, $membersByHh, $oldNetsByHh, $studyNetsByHh, $visitDataByHh) {
             $id         = $hh['household_id'];
@@ -1043,7 +1026,46 @@ class DashboardController extends Controller
             ];
         })->values();
 
-        return compact('total', 'like', 'satisfied', 'continueUse', 'recommend', 'easyUse', 'satisfactionDist', 'rows');
+        // ── Per-arm stats ──
+        $visitMap = $visits->filter(fn($v) => ($v['household_id'] ?? '') !== '')->keyBy('household_id');
+        $recordsWithArm = $records->map(function ($r) use ($visitMap) {
+            $hh  = $visitMap->get($r['household_id'], []);
+            $key = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, (array) $hh));
+            return array_merge($r, ['_arm' => $key]);
+        });
+        $armStats = function (string $arm) use ($recordsWithArm): array {
+            $recs = $recordsWithArm->where('_arm', $arm);
+            $n    = $recs->unique('household_id')->count();
+            return [
+                'total'       => $n,
+                'like'        => $recs->where('net_like', '1')->count(),
+                'satisfied'   => $recs->whereIn('net_overall_satisfaction', ['1', '2'])->count(),
+                'continueUse' => $recs->where('net_continue_use', '1')->count(),
+                'recommend'   => $recs->where('net_recommend', '1')->count(),
+                'easyUse'     => $recs->where('net_easy_use', '1')->count(),
+            ];
+        };
+        $byArm = ['PD' => $armStats('1'), 'G2' => $armStats('2')];
+
+        // ── Daily tablet activity ──
+        $uaJoined = $records->unique('household_id')
+            ->map(fn($r) => ['tablet' => $r['ac_tablet'] ?? '', 'date' => $r['ac_date_interview'] ?? ''])
+            ->filter(fn($r) => $r['tablet'] !== '' && $r['date'] !== '');
+        $allUaDates = $uaJoined->pluck('date')->unique()->sort()->values();
+        $uaTabletActivity = $uaJoined->groupBy('tablet')->map(function ($rows, $tablet) use ($allUaDates) {
+            $perDate = $rows->groupBy('date')->map->count();
+            return ['tablet' => $tablet, 'par_date' => $perDate->toArray(), 'total' => $rows->count()];
+        })->sortKeys()->values();
+        $uaTabletDatasets = $uaTabletActivity->map(function ($tab, $i) use ($allUaDates) {
+            return [
+                'label' => 'Tablette ' . $tab['tablet'],
+                'data'  => $allUaDates->map(fn($d) => $tab['par_date'][$d] ?? 0)->values()->toArray(),
+                'color' => self::TABLET_COLORS[$i % count(self::TABLET_COLORS)],
+            ];
+        })->values();
+
+        return compact('total', 'like', 'satisfied', 'continueUse', 'recommend', 'easyUse',
+                       'satisfactionDist', 'rows', 'byArm', 'uaTabletActivity', 'allUaDates', 'uaTabletDatasets');
     }
 
     private function buildAEData(array $raw, Collection $visits): array
@@ -1101,7 +1123,43 @@ class DashboardController extends Controller
             ];
         })->values();
 
-        return compact('total', 'anySymptom', 'continueUse', 'bedbugs', 'bbOnNet', 'symptomCounts', 'rows');
+        // ── Per-arm stats ──
+        $visitMap = $visits->filter(fn($v) => ($v['household_id'] ?? '') !== '')->keyBy('household_id');
+        $armFor = function (array $r) use ($visitMap): string {
+            $hh = $visitMap->get($r['household_id'], []);
+            return ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, (array) $hh));
+        };
+        $aeArmStats = function (string $arm) use ($form5a, $form5b, $armFor): array {
+            $a5 = $form5a->filter(fn($r) => $armFor($r) === $arm);
+            $b5 = $form5b->filter(fn($r) => $armFor($r) === $arm);
+            return [
+                'total'       => $a5->unique('household_id')->count(),
+                'anySymptom'  => $b5->where('ae_any_symptom', '1')->unique('household_id')->count(),
+                'continueUse' => $b5->where('itn_continue_use', '1')->unique('household_id')->count(),
+                'bedbugs'     => $a5->where('bedbugs_current_house', '1')->count(),
+            ];
+        };
+        $byArm = ['PD' => $aeArmStats('1'), 'G2' => $aeArmStats('2')];
+
+        // ── Daily tablet activity ──
+        $aeJoined = $form5a
+            ->filter(fn($r) => ($r['ae_tablette_id'] ?? '') !== '' && ($r['ad_evt_date'] ?? '') !== '')
+            ->map(fn($r) => ['tablet' => $r['ae_tablette_id'], 'date' => $r['ad_evt_date']]);
+        $allAeDates = $aeJoined->pluck('date')->unique()->sort()->values();
+        $aeTabletActivity = $aeJoined->groupBy('tablet')->map(function ($rows, $tablet) use ($allAeDates) {
+            $perDate = $rows->groupBy('date')->map->count();
+            return ['tablet' => $tablet, 'par_date' => $perDate->toArray(), 'total' => $rows->count()];
+        })->sortKeys()->values();
+        $aeTabletDatasets = $aeTabletActivity->map(function ($tab, $i) use ($allAeDates) {
+            return [
+                'label' => 'Tablette ' . $tab['tablet'],
+                'data'  => $allAeDates->map(fn($d) => $tab['par_date'][$d] ?? 0)->values()->toArray(),
+                'color' => self::TABLET_COLORS[$i % count(self::TABLET_COLORS)],
+            ];
+        })->values();
+
+        return compact('total', 'anySymptom', 'continueUse', 'bedbugs', 'bbOnNet',
+                       'symptomCounts', 'rows', 'byArm', 'aeTabletActivity', 'allAeDates', 'aeTabletDatasets');
     }
 
     private function buildFollowUpData(array $raw, Collection $visits): array

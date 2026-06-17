@@ -1,3 +1,5 @@
+@php $renderSection = $renderSection ?? null; @endphp
+@if(!$renderSection)
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -146,6 +148,22 @@
                 </svg>
                 GPS
             </a>
+            <a href="{{ route('acceptabilite.index') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                Acceptabilité
+            </a>
+            <a href="{{ route('ae.selection.index') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Sélection AE
+            </a>
             <a href="{{ route('rapport.bras') }}"
                class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -222,7 +240,9 @@
     </div>
 </nav>
 
+@endif
 {{-- ══════════════════ TAB PANELS ══════════════════ --}}
+@if(!$renderSection)
 <div class="max-w-screen-2xl mx-auto px-6 py-8">
 
     @if (session('success'))
@@ -230,8 +250,10 @@
             ✓ {{ session('success') }}
         </div>
     @endif
+@endif
 
     {{-- ══ TAB 1 : Baseline & Distribution ══ --}}
+    @if(!$renderSection || $renderSection === 'baseline')
     <div id="tab-baseline" class="tab-panel active space-y-8">
 
         @php extract($baseline); @endphp
@@ -768,9 +790,193 @@
 
         </section>
 
+    {{-- Inline chart scripts for baseline — executed by injectHTML on lazy-load --}}
+    <script>
+    (function(){
+        const RED='#C41230',RED_DARK='#8B0D21',RED_LT='#F9A8B4',GRAY='#374151',GREEN='#16A34A',GREEN_LT='#86EFAC';
+        // ── Chart Village ──
+        @if ($byVillage->count())
+        new Chart(document.getElementById('chartVillage'), {
+            type: 'bar',
+            data: {
+                labels: {!! $byVillage->pluck('label')->toJson() !!},
+                datasets: [
+                    { label:'Visités',  data:{!! $byVillage->pluck('total')->toJson() !!},    backgroundColor:RED_LT, borderColor:RED,   borderWidth:1.5, borderRadius:4 },
+                    { label:'Consentis',data:{!! $byVillage->pluck('consented')->toJson() !!},backgroundColor:GREEN_LT,borderColor:GREEN, borderWidth:1.5, borderRadius:4 }
+                ]
+            },
+            options: { responsive:true, plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
+        });
+        @endif
+        // ── Chart Bras ──
+        @if ($byBras->count())
+        new Chart(document.getElementById('chartBras'), {
+            type:'doughnut',
+            data:{ labels:{!! $byBras->pluck('label')->toJson() !!}, datasets:[{data:{!! $byBras->pluck('total')->toJson() !!},backgroundColor:[RED,GRAY],borderWidth:2}] },
+            options:{ responsive:true, cutout:'68%', plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}} }
+        });
+        @endif
+        // ── Chart Tablettes × Dates ──
+        @if ($allDates->count() && $tabletDatasets->count())
+        new Chart(document.getElementById('chartTablets'), {
+            type: 'bar',
+            data: {
+                labels: {!! $allDates->toJson() !!},
+                datasets: {!! $tabletDatasets->map(fn($d) => [
+                    'label'           => $d['label'],
+                    'data'            => $d['data'],
+                    'backgroundColor' => $d['color'],
+                    'borderColor'     => $d['color'],
+                    'borderWidth'     => 1,
+                    'borderRadius'    => 3,
+                ])->toJson() !!}
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } },
+                    tooltip: { mode:'index', intersect:false }
+                },
+                scales: {
+                    x: { stacked:false },
+                    y: { beginAtZero:true, ticks:{ stepSize:1 }, title:{ display:true, text:'Soumissions' } }
+                }
+            }
+        });
+        @endif
+        // ── Chart Performance ──
+        @if (!empty($performanceChart['datasets']))
+        new Chart(document.getElementById('chartPerformance'), {
+            type: 'line',
+            data: {
+                labels: {!! json_encode($performanceChart['labels']) !!},
+                datasets: {!! json_encode($performanceChart['datasets']) !!},
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => 'Date : ' + items[0].label,
+                            label: (item) => ' ' + item.dataset.label + ' : ' + item.parsed.y + ' enrôlé(s)',
+                        }
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: { font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 30 },
+                        grid: { color: '#F1F5F9' },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { font: { size: 10 }, stepSize: 1 },
+                        grid: { color: '#F1F5F9' },
+                        title: { display: true, text: 'Enrôlés / jour', font: { size: 10 } },
+                    },
+                },
+            },
+        });
+        @endif
+        // ── Chart Nets ──
+        @if ($netsByBras->count())
+        new Chart(document.getElementById('chartNets'), {
+            type:'doughnut',
+            data:{ labels:{!! $netsByBras->keys()->toJson() !!}, datasets:[{data:{!! $netsByBras->values()->toJson() !!},backgroundColor:[RED,GRAY],borderWidth:2}] },
+            options:{ responsive:true, cutout:'60%', plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}} }
+        });
+        @endif
+        // ── Leaflet ──
+        @php $gpsJson = $gpsData->toJson(); @endphp
+        (function(){
+            const pts = {!! $gpsJson !!};
+            if (!pts.length) {
+                const el = document.getElementById('map');
+                if (el) el.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9CA3AF;font-size:.875rem">Aucune coordonnée GPS</div>';
+                return;
+            }
+            const map = L.map('map').setView([pts.reduce((s,p)=>s+p.lat,0)/pts.length, pts.reduce((s,p)=>s+p.lng,0)/pts.length], 14);
+            const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri, Maxar, Earthstar Geographics', maxZoom: 19, maxNativeZoom: 17,
+            });
+            const esriLabels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19, maxNativeZoom: 17, opacity: 0.85,
+            });
+            [esriSat, esriLabels].forEach(layer => { layer.on('tileerror', e => { e.tile.style.opacity = '0'; }); });
+            const tileLayers = {
+                'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }),
+                'Satellite (Esri)': esriSat,
+                'Satellite + Labels': L.layerGroup([esriSat, esriLabels]),
+                'Topographique': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '© OpenTopoMap', maxZoom: 17 }),
+                'CartoDB Clair': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© CartoDB', maxZoom: 19 }),
+                'CartoDB Sombre': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© CartoDB', maxZoom: 19 }),
+            };
+            tileLayers['OpenStreetMap'].addTo(map);
+            L.control.layers(tileLayers, {}, { position: 'topleft', collapsed: false }).addTo(map);
+            const MAP_COLORS = {
+                'PERMANET DUAL':  { 'Cohorte A': '#C41230', 'Cohorte B': '#F97316' },
+                'INTERCEPTOR G2': { 'Cohorte A': '#374151', 'Cohorte B': '#2563EB' },
+            };
+            function makeIcon(color) {
+                return L.divIcon({ html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`, iconSize: [12, 12], className: '' });
+            }
+            pts.forEach(p => {
+                const color = ((MAP_COLORS[p.bras] || {})[p.cohort]) || '#9CA3AF';
+                L.marker([p.lat, p.lng], { icon: makeIcon(color) }).addTo(map)
+                 .bindPopup(`<strong>${p.id}</strong><br><small>${p.bras || '—'} · ${p.cohort || '—'}</small><br><small>📍 ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</small>`);
+            });
+            const legend = L.control({ position: 'bottomright' });
+            legend.onAdd = function() {
+                const div = L.DomUtil.create('div', '');
+                div.style.cssText = 'background:white;padding:8px 10px;border-radius:8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);line-height:1.8';
+                div.innerHTML = [
+                    '<b style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">Légende</b>',
+                    '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#C41230;display:inline-block;flex-shrink:0"></span>PERMANET DUAL — Cohorte A</div>',
+                    '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#F97316;display:inline-block;flex-shrink:0"></span>PERMANET DUAL — Cohorte B</div>',
+                    '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#374151;display:inline-block;flex-shrink:0"></span>INTERCEPTOR G2 — Cohorte A</div>',
+                    '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#2563EB;display:inline-block;flex-shrink:0"></span>INTERCEPTOR G2 — Cohorte B</div>',
+                ].join('');
+                return div;
+            };
+            legend.addTo(map);
+            const FsControl = L.Control.extend({
+                options: { position: 'topright' },
+                onAdd() {
+                    const btn = L.DomUtil.create('button');
+                    btn.title = 'Plein écran';
+                    btn.style.cssText = 'width:32px;height:32px;background:white;border:2px solid rgba(0,0,0,.2);border-radius:4px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.12)';
+                    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>';
+                    L.DomEvent.disableClickPropagation(btn);
+                    btn.addEventListener('click', () => {
+                        const el = map.getContainer();
+                        if (!document.fullscreenElement) { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+                        else { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+                    });
+                    const exitIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>';
+                    const enterIcon = btn.innerHTML;
+                    document.addEventListener('fullscreenchange', () => {
+                        btn.innerHTML = document.fullscreenElement ? exitIcon : enterIcon;
+                        setTimeout(() => map.invalidateSize(), 100);
+                    });
+                    document.addEventListener('webkitfullscreenchange', () => {
+                        btn.innerHTML = (document.fullscreenElement || document.webkitFullscreenElement) ? exitIcon : enterIcon;
+                        setTimeout(() => map.invalidateSize(), 100);
+                    });
+                    return btn;
+                }
+            });
+            new FsControl().addTo(map);
+            if (pts.length > 1) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])).pad(0.15), { maxZoom: 15 });
+        })();
+    })();
+    </script>
+
     </div>{{-- /tab-baseline --}}
+    @endif
 
     {{-- ══ TAB 2 : User Acceptability ══ --}}
+    @if(!$renderSection || $renderSection === 'ua')
     <div id="tab-ua" class="tab-panel space-y-6">
 
         @php
@@ -782,11 +988,12 @@
             $uaEasy      = $ua['easyUse']      ?? 0;
             $uaSatDist   = collect($ua['satisfactionDist'] ?? []);
             $uaRows      = collect($ua['rows'] ?? []);
+            $uaByArm     = $ua['byArm'] ?? ['PD' => [], 'G2' => []];
 
             $pctUA = fn($n) => $uaTotal > 0 ? round($n / $uaTotal * 100, 1) : 0;
         @endphp
 
-        {{-- KPI --}}
+        {{-- KPI global --}}
         <section class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
             <div class="kpi-card card border-t-2 p-4" style="border-color:var(--red)">
                 <p class="text-xs text-gray-400 uppercase tracking-widest mb-1">Ménages</p>
@@ -806,6 +1013,52 @@
                 </div>
             @endforeach
         </section>
+
+        {{-- KPI par bras --}}
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            @foreach ([
+                ['PD', 'PERMANET DUAL',  '#C41230', '#FDF4F5', $uaByArm['PD'] ?? []],
+                ['G2', 'INTERCEPTOR G2', '#374151', '#F9FAFB', $uaByArm['G2'] ?? []],
+            ] as [$armKey, $armLabel, $armColor, $armBg, $armData])
+            @php
+                $armN = $armData['total'] ?? 0;
+                $pctArm = fn($v) => $armN > 0 ? round($v / $armN * 100, 1) : 0;
+            @endphp
+            <div class="card overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center justify-between" style="background:{{ $armBg }}; border-bottom:2px solid {{ $armColor }}">
+                    <span class="text-xs font-bold uppercase tracking-widest" style="color:{{ $armColor }}">{{ $armLabel }}</span>
+                    <span class="text-xs font-semibold text-gray-500">{{ $armN }} ménages</span>
+                </div>
+                <div class="grid grid-cols-5 divide-x divide-gray-100">
+                    @foreach ([
+                        ['Aiment', $armData['like'] ?? 0],
+                        ['Satisfaits', $armData['satisfied'] ?? 0],
+                        ['Continueraient', $armData['continueUse'] ?? 0],
+                        ['Recommandent', $armData['recommend'] ?? 0],
+                        ['Facile', $armData['easyUse'] ?? 0],
+                    ] as [$lbl, $val])
+                    <div class="p-3 text-center">
+                        <p class="text-xs text-gray-400 leading-tight mb-1">{{ $lbl }}</p>
+                        <p class="text-xl font-extrabold" style="color:{{ $armColor }}">{{ $val }}</p>
+                        <p class="text-xs text-gray-400">{{ $pctArm($val) }}%</p>
+                    </div>
+                    @endforeach
+                </div>
+            </div>
+            @endforeach
+        </section>
+
+        {{-- Activité journalière par tablette (UA) --}}
+        @php
+            $uaAllDates   = $ua['allUaDates']      ?? collect();
+            $uaTabDatasets = $ua['uaTabletDatasets'] ?? collect();
+        @endphp
+        @if ($uaTabDatasets->isNotEmpty())
+        <section class="card p-6">
+            <p class="section-title mb-4">Activité journalière par tablette — User Acceptability</p>
+            <canvas id="chartUATablets" height="120"></canvas>
+        </section>
+        @endif
 
         {{-- Satisfaction dist + table --}}
         <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -931,9 +1184,63 @@
 
         </section>
 
+    {{-- Inline chart scripts for UA — executed by injectHTML on lazy-load --}}
+    <script>
+    (function(){
+        const RED='#C41230',RED_DARK='#8B0D21',RED_LT='#F9A8B4',GRAY='#374151',GREEN='#16A34A',GREEN_LT='#86EFAC';
+        // ── Chart UA Satisfaction ──
+        @if (!empty($ua['satisfactionDist']) && collect($ua['satisfactionDist'])->isNotEmpty())
+        (function(){
+            const el = document.getElementById('chartUASat');
+            if (!el) return;
+            const labels = {!! collect($ua['satisfactionDist'])->keys()->toJson() !!};
+            const data   = {!! collect($ua['satisfactionDist'])->values()->toJson() !!};
+            new Chart(el, {
+                type: 'doughnut',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: [RED, '#2563EB', '#D97706', '#374151'], borderWidth: 2 }] },
+                options: { responsive: true, cutout: '60%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } } }
+            });
+        })();
+        @endif
+        // ── Chart UA tablettes ──
+        @if (!empty($ua['uaTabletDatasets']) && collect($ua['uaTabletDatasets'])->isNotEmpty())
+        (function(){
+            const el = document.getElementById('chartUATablets');
+            if (!el) return;
+            const labels   = {!! collect($ua['allUaDates'] ?? [])->toJson() !!};
+            const datasets = {!! collect($ua['uaTabletDatasets'] ?? [])->toJson() !!};
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets.map(d => ({
+                        label: d.label,
+                        data: d.data,
+                        backgroundColor: d.color + 'CC',
+                        borderColor: d.color,
+                        borderWidth: 1,
+                        borderRadius: 3,
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+                    scales: {
+                        x: { stacked: false, ticks: { font: { size: 10 } } },
+                        y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } } }
+                    }
+                }
+            });
+        })();
+        @endif
+    })();
+    </script>
+
     </div>{{-- /tab-ua --}}
+    @endif
 
     {{-- ══ TAB 3 : Adverse Events ══ --}}
+    @if(!$renderSection || $renderSection === 'ae')
     <div id="tab-ae" class="tab-panel space-y-6">
 
         @php
@@ -944,11 +1251,12 @@
             $aeBbOnNet   = $ae['bbOnNet']        ?? 0;
             $aeSymCounts = collect($ae['symptomCounts'] ?? []);
             $aeRows      = collect($ae['rows'] ?? []);
+            $aeByArm     = $ae['byArm'] ?? ['PD' => [], 'G2' => []];
 
             $pctAE = fn($n) => $aeTotal > 0 ? round($n / $aeTotal * 100, 1) : 0;
         @endphp
 
-        {{-- KPI --}}
+        {{-- KPI global --}}
         <section class="grid grid-cols-2 sm:grid-cols-4 gap-5">
             <div class="kpi-card card border-t-2 p-5" style="border-color:var(--red)">
                 <p class="text-xs text-gray-400 uppercase tracking-widest mb-1">Ménages enquêtés</p>
@@ -970,6 +1278,50 @@
                 <p class="text-xs text-gray-400 mt-1">{{ $pctAE($aeBedbugs) }}% des ménages</p>
             </div>
         </section>
+
+        {{-- KPI par bras --}}
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            @foreach ([
+                ['PD', 'PERMANET DUAL',  '#C41230', '#FDF4F5', $aeByArm['PD'] ?? []],
+                ['G2', 'INTERCEPTOR G2', '#374151', '#F9FAFB', $aeByArm['G2'] ?? []],
+            ] as [$armKey, $armLabel, $armColor, $armBg, $armData])
+            @php
+                $armN = $armData['total'] ?? 0;
+                $pctAeArm = fn($v) => $armN > 0 ? round($v / $armN * 100, 1) : 0;
+            @endphp
+            <div class="card overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center justify-between" style="background:{{ $armBg }}; border-bottom:2px solid {{ $armColor }}">
+                    <span class="text-xs font-bold uppercase tracking-widest" style="color:{{ $armColor }}">{{ $armLabel }}</span>
+                    <span class="text-xs font-semibold text-gray-500">{{ $armN }} ménages</span>
+                </div>
+                <div class="grid grid-cols-3 divide-x divide-gray-100">
+                    @foreach ([
+                        ['Avec symptômes', $armData['anySymptom'] ?? 0],
+                        ['Continueraient', $armData['continueUse'] ?? 0],
+                        ['Punaises', $armData['bedbugs'] ?? 0],
+                    ] as [$lbl, $val])
+                    <div class="p-3 text-center">
+                        <p class="text-xs text-gray-400 leading-tight mb-1">{{ $lbl }}</p>
+                        <p class="text-xl font-extrabold" style="color:{{ $armColor }}">{{ $val }}</p>
+                        <p class="text-xs text-gray-400">{{ $pctAeArm($val) }}%</p>
+                    </div>
+                    @endforeach
+                </div>
+            </div>
+            @endforeach
+        </section>
+
+        {{-- Activité journalière par tablette (AE) --}}
+        @php
+            $aeAllDates    = $ae['allAeDates']      ?? collect();
+            $aeTabDatasets = $ae['aeTabletDatasets'] ?? collect();
+        @endphp
+        @if (collect($aeTabDatasets)->isNotEmpty())
+        <section class="card p-6">
+            <p class="section-title mb-4">Activité journalière par tablette — Adverse Events</p>
+            <canvas id="chartAETablets" height="120"></canvas>
+        </section>
+        @endif
 
         {{-- Symptom chart + table --}}
         <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1076,9 +1428,65 @@
 
         </section>
 
+    {{-- Inline chart scripts for AE — executed by injectHTML on lazy-load --}}
+    <script>
+    (function(){
+        const RED='#C41230',RED_DARK='#8B0D21',RED_LT='#F9A8B4',GRAY='#374151',GREEN='#16A34A',GREEN_LT='#86EFAC';
+        // ── Chart AE Symptômes ──
+        @if (!empty($ae['symptomCounts']) && collect($ae['symptomCounts'])->sum('count') > 0)
+        (function(){
+            const el = document.getElementById('chartAESym');
+            if (!el) return;
+            const syms = {!! collect($ae['symptomCounts'])->toJson() !!};
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: syms.map(s => s.label),
+                    datasets: [{ label: 'Cas signalés', data: syms.map(s => s.count), backgroundColor: RED, borderColor: RED_DARK, borderWidth: 1, borderRadius: 4 }]
+                },
+                options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+            });
+        })();
+        @endif
+        // ── Chart AE tablettes ──
+        @if (!empty($ae['aeTabletDatasets']) && collect($ae['aeTabletDatasets'])->isNotEmpty())
+        (function(){
+            const el = document.getElementById('chartAETablets');
+            if (!el) return;
+            const labels   = {!! collect($ae['allAeDates'] ?? [])->toJson() !!};
+            const datasets = {!! collect($ae['aeTabletDatasets'] ?? [])->toJson() !!};
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets.map(d => ({
+                        label: d.label,
+                        data: d.data,
+                        backgroundColor: d.color + 'CC',
+                        borderColor: d.color,
+                        borderWidth: 1,
+                        borderRadius: 3,
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+                    scales: {
+                        x: { stacked: false, ticks: { font: { size: 10 } } },
+                        y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } } }
+                    }
+                }
+            });
+        })();
+        @endif
+    })();
+    </script>
+
     </div>{{-- /tab-ae --}}
+    @endif
 
     {{-- ══ TAB : Suivi Cohorte A (6, 12, 24, 36 mois) ══ --}}
+    @if(!$renderSection || $renderSection === 'suivi_a' || $renderSection === 'followup')
     <div id="tab-suivi_a" class="tab-panel">
 
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden suivi-bloc">
@@ -1117,8 +1525,10 @@
         </div>
 
     </div>{{-- /tab-suivi_a --}}
+    @endif
 
     {{-- ══ TAB : Suivi Cohorte B (6, 12, 18, 24, 36 mois) ══ --}}
+    @if(!$renderSection || $renderSection === 'suivi' || $renderSection === 'followup')
     <div id="tab-suivi" class="tab-panel">
 
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden suivi-bloc">
@@ -1159,9 +1569,13 @@
         </div>
 
     </div>{{-- /tab-suivi --}}
+    @endif
 
     {{-- ══ TAB : Rapport d'activités ══ --}}
+    @if(!$renderSection || $renderSection === 'rapport')
     <div id="tab-rapport" class="tab-panel space-y-6">
+
+        @php if (!empty($baseline) && is_array($baseline)) extract($baseline); @endphp
 
         <div class="card p-6">
             <p class="section-title">Rapport d'activités des binômes</p>
@@ -1442,9 +1856,13 @@
         </div>
 
     </div>{{-- /tab-rapport --}}
+    @endif
 
     {{-- ══ TAB: Distribution des moustiquaires ══ --}}
+    @if(!$renderSection || $renderSection === 'distribution')
     <div id="tab-distribution" class="tab-panel space-y-6">
+
+        @php if (!empty($baseline) && is_array($baseline)) extract($baseline); @endphp
 
         {{-- ── Filters ── --}}
         <div class="card p-5">
@@ -1665,14 +2083,18 @@
         </div>
 
     </div>{{-- /tab-distribution --}}
+    @endif
 
+@if(!$renderSection)
 </div>{{-- /max-w --}}
 
 <footer class="text-center text-xs text-gray-400 py-6 mt-2">
     AIRID · ENDURE-Net · REDCap #{{ config('redcap.project_id') }} · Dassa-Zoumè, Bénin
 </footer>
+@endif
 
 {{-- ══════════════════ SCRIPTS ══════════════════ --}}
+@if(!$renderSection)
 <script>
 // ── Palette ──
 const RED      = '#C41230';
@@ -1825,95 +2247,6 @@ function filterNets() {
     if (_pg['netsTable']) { _pg['netsTable'].page = 1; applyPg('netsTable'); }
 }
 
-// ── Chart Village ──
-@if ($byVillage->count())
-new Chart(document.getElementById('chartVillage'), {
-    type: 'bar',
-    data: {
-        labels: {!! $byVillage->pluck('label')->toJson() !!},
-        datasets: [
-            { label:'Visités',  data:{!! $byVillage->pluck('total')->toJson() !!},    backgroundColor:RED_LT, borderColor:RED,   borderWidth:1.5, borderRadius:4 },
-            { label:'Consentis',data:{!! $byVillage->pluck('consented')->toJson() !!},backgroundColor:GREEN_LT,borderColor:GREEN, borderWidth:1.5, borderRadius:4 }
-        ]
-    },
-    options: { responsive:true, plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
-});
-@endif
-
-// ── Chart Bras ──
-@if ($byBras->count())
-new Chart(document.getElementById('chartBras'), {
-    type:'doughnut',
-    data:{ labels:{!! $byBras->pluck('label')->toJson() !!}, datasets:[{data:{!! $byBras->pluck('total')->toJson() !!},backgroundColor:[RED,GRAY],borderWidth:2}] },
-    options:{ responsive:true, cutout:'68%', plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}} }
-});
-@endif
-
-// ── Chart Tablettes × Dates ──
-@if ($allDates->count() && $tabletDatasets->count())
-new Chart(document.getElementById('chartTablets'), {
-    type: 'bar',
-    data: {
-        labels: {!! $allDates->toJson() !!},
-        datasets: {!! $tabletDatasets->map(fn($d) => [
-            'label'           => $d['label'],
-            'data'            => $d['data'],
-            'backgroundColor' => $d['color'],
-            'borderColor'     => $d['color'],
-            'borderWidth'     => 1,
-            'borderRadius'    => 3,
-        ])->toJson() !!}
-    },
-    options: {
-        responsive: true,
-        plugins: {
-            legend: { position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } },
-            tooltip: { mode:'index', intersect:false }
-        },
-        scales: {
-            x: { stacked:false },
-            y: { beginAtZero:true, ticks:{ stepSize:1 }, title:{ display:true, text:'Soumissions' } }
-        }
-    }
-});
-@endif
-
-// ── Chart Performance (ménages enrôlés / jour / tablette) ──
-@if (!empty($performanceChart['datasets']))
-new Chart(document.getElementById('chartPerformance'), {
-    type: 'line',
-    data: {
-        labels: {!! json_encode($performanceChart['labels']) !!},
-        datasets: {!! json_encode($performanceChart['datasets']) !!},
-    },
-    options: {
-        responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-            tooltip: {
-                callbacks: {
-                    title: (items) => 'Date : ' + items[0].label,
-                    label: (item) => ' ' + item.dataset.label + ' : ' + item.parsed.y + ' enrôlé(s)',
-                }
-            },
-        },
-        scales: {
-            x: {
-                ticks: { font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 30 },
-                grid: { color: '#F1F5F9' },
-            },
-            y: {
-                beginAtZero: true,
-                ticks: { font: { size: 10 }, stepSize: 1 },
-                grid: { color: '#F1F5F9' },
-                title: { display: true, text: 'Enrôlés / jour', font: { size: 10 } },
-            },
-        },
-    },
-});
-@endif
-
 // ── Distribution filter ──
 function applyDistFilter() {
     const from = document.getElementById('distFrom').value;
@@ -1959,127 +2292,6 @@ function downloadPerformancePdf() {
     document.getElementById('performancePdfForm').submit();
 }
 
-// ── Chart Nets ──
-@if ($netsByBras->count())
-new Chart(document.getElementById('chartNets'), {
-    type:'doughnut',
-    data:{ labels:{!! $netsByBras->keys()->toJson() !!}, datasets:[{data:{!! $netsByBras->values()->toJson() !!},backgroundColor:[RED,GRAY],borderWidth:2}] },
-    options:{ responsive:true, cutout:'60%', plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}} }
-});
-@endif
-
-// ── Leaflet ──
-@php $gpsJson = $gpsData->toJson(); @endphp
-(function(){
-    const pts = {!! $gpsJson !!};
-    if (!pts.length) {
-        document.getElementById('map').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9CA3AF;font-size:.875rem">Aucune coordonnée GPS</div>';
-        return;
-    }
-    const map = L.map('map').setView([pts.reduce((s,p)=>s+p.lat,0)/pts.length, pts.reduce((s,p)=>s+p.lng,0)/pts.length], 14);
-
-    const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: '© Esri, Maxar, Earthstar Geographics',
-        maxZoom: 19, maxNativeZoom: 17,
-    });
-    const esriLabels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19, maxNativeZoom: 17, opacity: 0.85,
-    });
-
-    // Masquer les tuiles en erreur plutôt que d'afficher le placeholder gris
-    [esriSat, esriLabels].forEach(layer => {
-        layer.on('tileerror', e => { e.tile.style.opacity = '0'; });
-    });
-
-    const tileLayers = {
-        'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap', maxZoom: 19
-        }),
-        'Satellite (Esri)': esriSat,
-        'Satellite + Labels': L.layerGroup([esriSat, esriLabels]),
-        'Topographique': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenTopoMap', maxZoom: 17
-        }),
-        'CartoDB Clair': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '© CartoDB', maxZoom: 19
-        }),
-        'CartoDB Sombre': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '© CartoDB', maxZoom: 19
-        }),
-    };
-    tileLayers['OpenStreetMap'].addTo(map);
-    L.control.layers(tileLayers, {}, { position: 'topleft', collapsed: false }).addTo(map);
-
-    const MAP_COLORS = {
-        'PERMANET DUAL':  { 'Cohorte A': '#C41230', 'Cohorte B': '#F97316' },
-        'INTERCEPTOR G2': { 'Cohorte A': '#374151', 'Cohorte B': '#2563EB' },
-    };
-
-    function makeIcon(color) {
-        return L.divIcon({
-            html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
-            iconSize: [12, 12],
-            className: ''
-        });
-    }
-
-    pts.forEach(p => {
-        const color = ((MAP_COLORS[p.bras] || {})[p.cohort]) || '#9CA3AF';
-        L.marker([p.lat, p.lng], { icon: makeIcon(color) })
-         .addTo(map)
-         .bindPopup(`<strong>${p.id}</strong><br><small>${p.bras || '—'} · ${p.cohort || '—'}</small><br><small>📍 ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</small>`);
-    });
-
-    const legend = L.control({ position: 'bottomright' });
-    legend.onAdd = function() {
-        const div = L.DomUtil.create('div', '');
-        div.style.cssText = 'background:white;padding:8px 10px;border-radius:8px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);line-height:1.8';
-        div.innerHTML = [
-            '<b style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">Légende</b>',
-            '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#C41230;display:inline-block;flex-shrink:0"></span>PERMANET DUAL — Cohorte A</div>',
-            '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#F97316;display:inline-block;flex-shrink:0"></span>PERMANET DUAL — Cohorte B</div>',
-            '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#374151;display:inline-block;flex-shrink:0"></span>INTERCEPTOR G2 — Cohorte A</div>',
-            '<div style="display:flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#2563EB;display:inline-block;flex-shrink:0"></span>INTERCEPTOR G2 — Cohorte B</div>',
-        ].join('');
-        return div;
-    };
-    legend.addTo(map);
-
-    // Fullscreen control
-    const FsControl = L.Control.extend({
-        options: { position: 'topright' },
-        onAdd() {
-            const btn = L.DomUtil.create('button');
-            btn.title = 'Plein écran';
-            btn.style.cssText = 'width:32px;height:32px;background:white;border:2px solid rgba(0,0,0,.2);border-radius:4px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.12)';
-            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>';
-            L.DomEvent.disableClickPropagation(btn);
-            btn.addEventListener('click', () => {
-                const el = map.getContainer();
-                if (!document.fullscreenElement) {
-                    (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
-                } else {
-                    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-                }
-            });
-            const exitIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>';
-            const enterIcon = btn.innerHTML;
-            document.addEventListener('fullscreenchange', () => {
-                btn.innerHTML = document.fullscreenElement ? exitIcon : enterIcon;
-                setTimeout(() => map.invalidateSize(), 100);
-            });
-            document.addEventListener('webkitfullscreenchange', () => {
-                btn.innerHTML = (document.fullscreenElement || document.webkitFullscreenElement) ? exitIcon : enterIcon;
-                setTimeout(() => map.invalidateSize(), 100);
-            });
-            return btn;
-        }
-    });
-    new FsControl().addTo(map);
-
-    if (pts.length > 1) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])).pad(0.15), { maxZoom: 15 });
-})();
-
 // ── Inner suivi timepoint tabs (scoped per bloc) ──
 function showSuiviTab(key, btn) {
     const bloc = btn.closest('.suivi-bloc');
@@ -2099,61 +2311,6 @@ function filterFwTable(input, key) {
     if (_pg[tid]) { _pg[tid].page = 1; applyPg(tid); }
 }
 
-// ── Chart UA Satisfaction ──
-@if (!empty($ua['satisfactionDist']) && collect($ua['satisfactionDist'])->isNotEmpty())
-(function(){
-    const el = document.getElementById('chartUASat');
-    if (!el) return;
-    const labels = {!! collect($ua['satisfactionDist'])->keys()->toJson() !!};
-    const data   = {!! collect($ua['satisfactionDist'])->values()->toJson() !!};
-    new Chart(el, {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: [RED, '#2563EB', '#D97706', '#374151'],
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            cutout: '60%',
-            plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }
-        }
-    });
-})();
-@endif
-
-// ── Chart AE Symptômes ──
-@if (!empty($ae['symptomCounts']) && collect($ae['symptomCounts'])->sum('count') > 0)
-(function(){
-    const el = document.getElementById('chartAESym');
-    if (!el) return;
-    const syms = {!! collect($ae['symptomCounts'])->toJson() !!};
-    new Chart(el, {
-        type: 'bar',
-        data: {
-            labels: syms.map(s => s.label),
-            datasets: [{
-                label: 'Cas signalés',
-                data: syms.map(s => s.count),
-                backgroundColor: RED,
-                borderColor: RED_DARK,
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } }
-        }
-    });
-})();
-@endif
-
 // ── PWA ──
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
@@ -2163,3 +2320,4 @@ document.querySelectorAll('[id^="fwTable-"]').forEach(t => setupPagination(t.id)
 </script>
 </body>
 </html>
+@endif

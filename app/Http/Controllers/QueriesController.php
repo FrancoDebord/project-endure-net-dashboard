@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AeSelectedHousehold;
 use App\Services\RedCapService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -245,7 +246,14 @@ class QueriesController extends Controller
             ->merge($this->checkAEDetailWithoutSymptom($aeRaw, $visits))
             ->merge($this->checkBedbugContradiction($aeRaw, $visits))
             ->merge($this->checkUASatisfactionContradiction($uaRaw, $visits))
-            ->merge($this->checkUAContinueContradiction($uaRaw, $visits));
+            ->merge($this->checkUAContinueContradiction($uaRaw, $visits))
+            ->merge($this->checkUALikeRecommendContradiction($uaRaw, $visits))
+            ->merge($this->checkUASatisfiedButQuit($uaRaw, $visits))
+            ->merge($this->checkUAFormIncomplete($uaRaw, $visits))
+            ->merge($this->checkAEStopWithoutBedbugs($aeRaw, $visits))
+            ->merge($this->checkAESelectedWithoutRecord($aeRaw, $visits))
+            ->merge($this->checkAEMissingDate($aeRaw, $visits))
+            ->merge($this->checkAEQuitWithoutSymptom($aeRaw, $visits));
 
         foreach ($followUpRaw as $event => $raw) {
             $queries = $queries->merge($this->checkFollowUpContradictions($raw, $visits, $event));
@@ -1316,6 +1324,219 @@ class QueriesController extends Controller
                     'tablet'       => $hh['a_tablette_id'] ?? '',
                     'field'        => 'net_like / net_recommend / net_continue_use',
                     'value'        => 'net_like=1, net_recommend=1, net_continue_use=0',
+                ]
+            );
+        }
+        return $results;
+    }
+
+    // ── User Acceptability — nouveaux checks ─────────────────────────────────
+
+    private function checkUALikeRecommendContradiction(array $uaRaw, Collection $visits): array
+    {
+        $results = [];
+        foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
+            if (($r['net_like'] ?? '') !== '0' || ($r['net_recommend'] ?? '') !== '1') continue;
+            $id = $r['household_id'];
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-UA-03', 'warning',
+                'Contradiction — n\'aime pas le filet mais le recommande',
+                "Pour le ménage {$id}, l'utilisateur déclare ne pas apprécier le filet (net_like = Non) mais recommanderait ce type de filet à d'autres personnes (net_recommend = Oui). Ces deux réponses sont logiquement incompatibles.",
+                "Recontacter l'agent pour clarifier. Probable erreur de saisie sur net_like ou net_recommend. Corriger la réponse erronée dans REDCap.",
+                [
+                    'event'        => 'user_acceptability_arm_1',
+                    'form'         => 'form_6_user_acceptability',
+                    'household_id' => $id,
+                    'tablet'       => $hh['a_tablette_id'] ?? '',
+                    'field'        => 'net_like / net_recommend',
+                    'value'        => 'net_like=0, net_recommend=1',
+                ]
+            );
+        }
+        return $results;
+    }
+
+    private function checkUASatisfiedButQuit(array $uaRaw, Collection $visits): array
+    {
+        $results = [];
+        foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
+            if (($r['net_overall_satisfaction'] ?? '') !== '1' || ($r['net_continue_use'] ?? '') !== '0') continue;
+            $id = $r['household_id'];
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-UA-04', 'warning',
+                'Contradiction — très satisfait mais ne veut pas continuer',
+                "Pour le ménage {$id}, l'utilisateur est très satisfait du filet (net_overall_satisfaction = 1 — Très satisfait) mais ne souhaite pas continuer à l'utiliser (net_continue_use = Non). Ces deux réponses sont logiquement incompatibles.",
+                "Vérifier la réponse à net_continue_use avec l'agent. Probable erreur de saisie (inversion Oui/Non). Corriger dans REDCap.",
+                [
+                    'event'        => 'user_acceptability_arm_1',
+                    'form'         => 'form_6_user_acceptability',
+                    'household_id' => $id,
+                    'tablet'       => $hh['a_tablette_id'] ?? '',
+                    'field'        => 'net_overall_satisfaction / net_continue_use',
+                    'value'        => 'net_overall_satisfaction=1 (Très satisfait), net_continue_use=0',
+                ]
+            );
+        }
+        return $results;
+    }
+
+    private function checkUAFormIncomplete(array $uaRaw, Collection $visits): array
+    {
+        $results = [];
+        foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
+            $isEmpty = ($r['net_like'] ?? '') === ''
+                && ($r['net_overall_satisfaction'] ?? '') === ''
+                && ($r['net_continue_use'] ?? '') === ''
+                && ($r['net_recommend'] ?? '') === '';
+            if (!$isEmpty) continue;
+            $id = $r['household_id'];
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-UA-05', 'critical',
+                'Formulaire Acceptabilité vide — champs essentiels manquants',
+                "Pour le ménage {$id}, un enregistrement existe dans le formulaire Acceptabilité utilisateur (Form 6) mais tous les champs essentiels sont vides (net_like, net_overall_satisfaction, net_continue_use, net_recommend). Le formulaire a probablement été ouvert sans être complété.",
+                "Compléter le formulaire Acceptabilité utilisateur (Form 6) pour ce ménage dans REDCap lors de la prochaine occasion.",
+                [
+                    'event'        => 'user_acceptability_arm_1',
+                    'form'         => 'form_6_user_acceptability',
+                    'household_id' => $id,
+                    'tablet'       => $hh['a_tablette_id'] ?? '',
+                    'field'        => 'net_like, net_overall_satisfaction, net_continue_use, net_recommend',
+                    'value'        => 'tous vides',
+                ]
+            );
+        }
+        return $results;
+    }
+
+    // ── Adverse Events — nouveaux checks ─────────────────────────────────────
+
+    private function checkAEStopWithoutBedbugs(array $aeRaw, Collection $visits): array
+    {
+        $form5a = collect($aeRaw)->filter(fn($r) =>
+            $r['household_id'] !== '' &&
+            ($r['redcap_repeat_instrument'] === '' ||
+             $r['redcap_repeat_instrument'] === 'form_5a_informations_gnriques_adverse_events')
+        );
+
+        $results = [];
+        foreach ($form5a as $r) {
+            if (($r['bb_stop_net_use_ever'] ?? '') !== '1' || ($r['bb_seen_on_net_ever'] ?? '') !== '0') continue;
+            $id = $r['household_id'];
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-AE-04', 'warning',
+                'Arrêt d\'utilisation du filet sans observation de punaises',
+                "Pour le ménage {$id}, l'utilisateur déclare avoir arrêté d'utiliser le filet à cause des punaises (bb_stop_net_use_ever = Oui) mais n'avoir jamais observé de punaises sur le filet (bb_seen_on_net_ever = Non). Contradiction logique.",
+                "Clarifier avec l'agent : si le filet a bien été abandonné à cause des punaises, corriger bb_seen_on_net_ever à Oui. Sinon, corriger bb_stop_net_use_ever à Non.",
+                [
+                    'event'        => 'adverse_events_arm_1',
+                    'form'         => 'form_5a_informations_gnriques_adverse_events',
+                    'household_id' => $id,
+                    'tablet'       => $r['tablet_code'] ?? $hh['a_tablette_id'] ?? '',
+                    'field'        => 'bb_stop_net_use_ever / bb_seen_on_net_ever',
+                    'value'        => 'bb_stop_net_use_ever=1, bb_seen_on_net_ever=0',
+                    'extra'        => 'Date EI : ' . ($r['ad_evt_date'] ?? '—'),
+                ]
+            );
+        }
+        return $results;
+    }
+
+    private function checkAESelectedWithoutRecord(array $aeRaw, Collection $visits): array
+    {
+        // Ménages ayant au moins un enregistrement non-répétant dans l'event AE
+        $aeHouseholdIds = collect($aeRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+            ->pluck('household_id')
+            ->flip();
+
+        $selectedIds = AeSelectedHousehold::pluck('household_id');
+
+        $results = [];
+        foreach ($selectedIds as $id) {
+            if ($aeHouseholdIds->has($id)) continue;
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-AE-05', 'warning',
+                'Ménage AE sélectionné sans formulaire REDCap',
+                "Le ménage {$id} a été retenu dans la sélection aléatoire Adverse Events mais aucun enregistrement n'existe dans le formulaire Adverse Events de REDCap (event adverse_events_arm_1). La visite AE n'a probablement pas encore été effectuée ou saisie.",
+                "Effectuer la visite Adverse Events pour ce ménage et saisir le formulaire Form 5A dans REDCap sur l'événement adverse_events_arm_1.",
+                [
+                    'event'        => 'adverse_events_arm_1',
+                    'form'         => 'form_5a_informations_gnriques_adverse_events',
+                    'household_id' => $id,
+                    'tablet'       => $hh['a_tablette_id'] ?? '',
+                    'initials'     => $hh['a_initiales_id'] ?? '',
+                    'field'        => '(aucun)',
+                    'value'        => 'Formulaire absent',
+                ]
+            );
+        }
+        return $results;
+    }
+
+    private function checkAEMissingDate(array $aeRaw, Collection $visits): array
+    {
+        $form5a = collect($aeRaw)->filter(fn($r) =>
+            $r['household_id'] !== '' &&
+            ($r['redcap_repeat_instrument'] === '' ||
+             $r['redcap_repeat_instrument'] === 'form_5a_informations_gnriques_adverse_events') &&
+            ($r['ad_evt_date'] ?? '') === ''
+        );
+
+        $results = [];
+        foreach ($form5a as $r) {
+            $id = $r['household_id'];
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-AE-06', 'warning',
+                'Date de visite Adverse Events manquante',
+                "Pour le ménage {$id}, un enregistrement existe dans le formulaire Adverse Events (Form 5A) mais la date de visite (ad_evt_date) n'est pas renseignée. Ce champ est obligatoire pour tracer la chronologie des événements indésirables.",
+                "Renseigner la date de visite Adverse Events (ad_evt_date) dans le formulaire Form 5A pour ce ménage dans REDCap.",
+                [
+                    'event'        => 'adverse_events_arm_1',
+                    'form'         => 'form_5a_informations_gnriques_adverse_events',
+                    'household_id' => $id,
+                    'tablet'       => $r['tablet_code'] ?? $hh['a_tablette_id'] ?? '',
+                    'field'        => 'ad_evt_date',
+                    'value'        => 'vide',
+                ]
+            );
+        }
+        return $results;
+    }
+
+    private function checkAEQuitWithoutSymptom(array $aeRaw, Collection $visits): array
+    {
+        // Par ménage : au moins une instance form5b avec symptôme ?
+        $hasSymptomByHh = collect($aeRaw)->filter(fn($r) =>
+            $r['household_id'] !== '' &&
+            $r['redcap_repeat_instrument'] === 'form_5_adverse_avents'
+        )->groupBy('household_id')
+        ->map(fn($rows) => $rows->contains(fn($r) => ($r['ae_any_symptom'] ?? '') === '1'));
+
+        $form5b = collect($aeRaw)->filter(fn($r) =>
+            $r['household_id'] !== '' &&
+            $r['redcap_repeat_instrument'] === 'form_5_adverse_avents' &&
+            ($r['itn_continue_use'] ?? '') === '0'
+        );
+
+        $results = [];
+        $seen = [];
+        foreach ($form5b as $r) {
+            $id = $r['household_id'];
+            if ($hasSymptomByHh->get($id, false)) continue; // symptôme présent → justifié
+            if (isset($seen[$id])) continue;
+            $seen[$id] = true;
+            $hh = $visits->firstWhere('household_id', $id);
+            $results[] = $this->q('Q-AE-07', 'info',
+                'Arrêt d\'utilisation du filet sans symptôme déclaré',
+                "Pour le ménage {$id}, l'utilisateur déclare ne pas vouloir continuer à utiliser le filet (itn_continue_use = Non) mais aucun symptôme lié au filet n'est rapporté dans le formulaire Adverse Events (ae_any_symptom = Non ou vide pour toutes les instances). L'absence de justification mérite vérification.",
+                "Interroger l'agent sur la raison de l'arrêt d'utilisation. Si un symptôme existe, le saisir dans le formulaire Form 5B. Sinon, vérifier si la réponse à itn_continue_use est correcte.",
+                [
+                    'event'        => 'adverse_events_arm_1',
+                    'form'         => 'form_5_adverse_avents',
+                    'household_id' => $id,
+                    'tablet'       => $r['tablet_code'] ?? $hh['a_tablette_id'] ?? '',
+                    'field'        => 'itn_continue_use / ae_any_symptom',
+                    'value'        => 'itn_continue_use=0, ae_any_symptom=0 ou vide',
                 ]
             );
         }

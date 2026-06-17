@@ -41,34 +41,26 @@ class GpsExportController extends Controller
 
     public function index(): View
     {
-        set_time_limit(120);
-        try {
-            $idRaw = $this->redcap->getIdentificationData();
-            $rows  = collect($idRaw)
-                ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+        // Villages et grappes sont connus statiquement — aucun appel REDCap
+        $villages = array_keys(array_filter(self::VILLAGE_LABELS, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY));
+        $clusters = array_keys(self::CLUSTER_LABELS);
+
+        // Tablets et DAGs depuis le cache uniquement (pas d'appel bloquant)
+        $tablets = [];
+        $dags    = [];
+        $cached  = \Illuminate\Support\Facades\Cache::get('redcap.identification', []);
+        if (!empty($cached)) {
+            $rows    = collect($cached)
+                ->filter(fn($r) => ($r['household_id'] ?? '') !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
                 ->unique('household_id');
-
-            $tablets = $rows->map(function ($r) {
-                    $p = explode('-', $r['household_id'] ?? '');
-                    return count($p) === 5 ? $p[3] : null;
-                })
-                ->filter()
-                ->unique()->sort()->values()->all();
-
-            $dags = $rows->pluck('redcap_data_access_group')
+            $tablets = $rows->map(fn($r) => count($p = explode('-', $r['household_id'])) === 5 ? $p[3] : null)
+                ->filter()->unique()->sort()->values()->all();
+            $dags    = $rows->pluck('redcap_data_access_group')
                 ->filter(fn($v) => $v !== '' && $v !== null)
                 ->unique()->sort()->values()->all();
-
-            $villages = $rows->pluck('village')
-                ->filter(fn($v) => $v !== '' && $v !== null)
-                ->unique()->sort()->values()->all();
-        } catch (\Throwable) {
-            $tablets  = [];
-            $dags     = [];
-            $villages = [];
         }
 
-        return view('gps-export', compact('tablets', 'dags', 'villages'));
+        return view('gps-export', compact('tablets', 'dags', 'villages', 'clusters'));
     }
 
     public function export(Request $request): \Illuminate\Http\Response|\Illuminate\Http\RedirectResponse
@@ -104,7 +96,8 @@ class GpsExportController extends Controller
                 $lat = ($r['a_geo_latitude_id']   ?? '') ?: ($visite['a_geo_latitude_id']  ?? '') ?: ($qb['b_geo_latitude']  ?? '');
                 $lng = ($r['a_geo_longitude_id']  ?? '') ?: ($visite['a_geo_longitude_id'] ?? '') ?: ($qb['b_geo_longitude'] ?? '');
 
-                $cluster = ($r['cluster_djigbe']  ?? '')
+                $cluster = ($r['cluster_id']      ?? '')
+                        ?: ($r['cluster_djigbe']  ?? '')
                         ?: ($r['cluster_gbonou']  ?? '')
                         ?: ($r['cluster_miniffi'] ?? '');
                 $consent = ($r['consent_accepted'] ?? '') ?: ($qb['consent_accepted'] ?? '');
