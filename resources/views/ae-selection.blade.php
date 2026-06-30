@@ -134,8 +134,16 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
+            <a href="{{ route('inspections') }}"
+               class="flex items-center gap-1.5 text-xs bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30 transition font-medium">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+                </svg>
+                Inspections
+            </a>
             {{-- Bouton PDF principal (avec filtres actifs) --}}
-            <a href="{{ route('ae.selection.excel', request()->only(['arm','village','cluster','dag','cohort','status'])) }}"
+            <a href="{{ route('ae.selection.excel', request()->only(['arm','village','cluster','dag','cohort','status','search','tablet'])) }}"
                class="btn-secondary text-xs" style="background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.25);">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -143,7 +151,7 @@
                 </svg>
                 Exporter Excel
             </a>
-            <a href="{{ route('ae.selection.pdf', request()->only(['arm','village','cluster','dag','status'])) }}"
+            <a href="{{ route('ae.selection.pdf', request()->only(['arm','village','cluster','dag','cohort','status','search','tablet'])) }}"
                class="btn-secondary text-xs" style="background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.25);">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -180,7 +188,7 @@
 <div class="max-w-screen-2xl mx-auto px-6 py-6 space-y-6">
 
     {{-- ── KPI globaux ──────────────────────────────────────────────────────── --}}
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div class="card p-5">
             <div class="text-xs font-700 text-slate-500 uppercase tracking-wide mb-2">Total sélectionnés</div>
             <div class="font-extrabold text-3xl" style="color:#1E293B">{{ $stats['total'] }}</div>
@@ -201,13 +209,20 @@
             <div class="font-extrabold text-3xl" style="color:#0369A1">{{ $stats['redcap_rate'] }}%</div>
             <div class="text-xs text-slate-400 mt-1">basé sur formulaires REDCap</div>
         </div>
+        <div class="card p-5" style="border-left:4px solid #7C3AED">
+            <div class="text-xs font-700 text-slate-500 uppercase tracking-wide mb-2">Moustiquaires attendues</div>
+            <div class="font-extrabold text-3xl" style="color:#7C3AED">{{ number_format($stats['nets_total']) }}</div>
+            <div class="text-xs text-slate-400 mt-1">total des 2 bras</div>
+        </div>
     </div>
 
     {{-- ── KPI par bras ─────────────────────────────────────────────────────── --}}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         @foreach($stats['by_arm'] as $armKey => $arm)
-        <div class="card p-5">
-            <div class="flex items-center justify-between mb-3">
+        <div class="card overflow-hidden">
+            {{-- En-tête bras --}}
+            <div class="px-5 py-3 flex items-center justify-between border-b border-slate-100"
+                 style="background:{{ $armKey==='PD'?'#FDF4F5':'#F9FAFB' }}">
                 <div class="flex items-center gap-2">
                     <span class="w-3 h-3 rounded-full" style="background:{{ $arm['color'] }}"></span>
                     <span class="font-bold text-sm text-slate-800">{{ $arm['label'] }}</span>
@@ -215,13 +230,29 @@
                 </div>
                 <span class="text-2xl font-extrabold" style="color:{{ $arm['color'] }}">{{ $arm['redcap_rate'] }}%</span>
             </div>
-            <div class="prog mb-2">
-                <div class="prog-fill" style="width:{{ $arm['redcap_rate'] }}%;background:{{ $arm['color'] }}"></div>
+            {{-- Progression --}}
+            <div class="px-5 pt-3 pb-2">
+                <div class="prog mb-2">
+                    <div class="prog-fill" style="width:{{ $arm['redcap_rate'] }}%;background:{{ $arm['color'] }}"></div>
+                </div>
+                <div class="flex justify-between text-xs text-slate-500">
+                    <span><b class="text-green-700">{{ $arm['redcap_visited'] }}</b> visités (REDCap)</span>
+                    <span><b class="text-red-700">{{ $arm['redcap_pending'] }}</b> en attente</span>
+                    <span><b class="text-slate-700">{{ $arm['total'] }}</b> sélectionnés</span>
+                </div>
             </div>
-            <div class="flex justify-between text-xs text-slate-500">
-                <span><b class="text-green-700">{{ $arm['redcap_visited'] }}</b> visités (REDCap)</span>
-                <span><b class="text-red-700">{{ $arm['redcap_pending'] }}</b> en attente</span>
-                <span><b class="text-slate-700">{{ $arm['total'] }}</b> total</span>
+            {{-- Moustiquaires attendues --}}
+            <div class="border-t border-slate-100 grid grid-cols-2 divide-x divide-slate-100">
+                <div class="px-5 py-3 text-center">
+                    <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Moustiquaires attendues</div>
+                    <div class="text-2xl font-extrabold" style="color:#7C3AED">{{ number_format($arm['nets_total']) }}</div>
+                    <div class="text-xs text-slate-400 mt-0.5">dans {{ $arm['total'] }} ménages</div>
+                </div>
+                <div class="px-5 py-3 text-center">
+                    <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Moyenne / ménage</div>
+                    <div class="text-2xl font-extrabold text-slate-600">{{ $arm['nets_avg'] }}</div>
+                    <div class="text-xs text-slate-400 mt-0.5">moustiquaire(s) / ménage</div>
+                </div>
             </div>
         </div>
         @endforeach
@@ -255,7 +286,7 @@
             </button>
             @if($stats['total'] > 0)
             <div class="ml-auto flex gap-2">
-                <a href="{{ route('ae.selection.excel', request()->only(['arm','village','cluster','dag','cohort','status'])) }}"
+                <a href="{{ route('ae.selection.excel', request()->only(['arm','village','cluster','dag','cohort','status','search','tablet'])) }}"
                    class="btn-secondary">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -263,7 +294,7 @@
                     </svg>
                     Exporter Excel
                 </a>
-                <a href="{{ route('ae.selection.pdf', request()->only(['arm','village','cluster','dag','status'])) }}"
+                <a href="{{ route('ae.selection.pdf', request()->only(['arm','village','cluster','dag','cohort','status','search','tablet'])) }}"
                    class="btn-secondary">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -305,7 +336,7 @@
     <div class="card p-4">
         <div class="section-title">Filtres</div>
         <form id="filter-form" method="GET" action="{{ route('ae.selection.index') }}"
-              class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 items-end">
+              class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
             <div>
                 <label class="form-label">Bras</label>
                 <select name="arm" class="form-select">
@@ -361,11 +392,23 @@
                 </select>
             </div>
             <div>
+                <label class="form-label">Tablette</label>
+                <select name="tablet" class="form-select">
+                    <option value="">Toutes</option>
+                    @foreach(range(1, 15) as $t)
+                    <option value="{{ str_pad($t, 2, '0', STR_PAD_LEFT) }}"
+                            {{ request('tablet') == str_pad($t, 2, '0', STR_PAD_LEFT) ? 'selected' : '' }}>
+                        Tablette {{ str_pad($t, 2, '0', STR_PAD_LEFT) }}
+                    </option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
                 <label class="form-label">Recherche</label>
                 <input type="text" name="search" value="{{ request('search') }}"
                        placeholder="ID, nom…" class="form-input">
             </div>
-            <div class="col-span-2 md:col-span-4 lg:col-span-7 flex gap-2 justify-end items-center">
+            <div class="col-span-2 md:col-span-4 lg:col-span-8 flex gap-2 justify-end items-center">
                 <span id="filter-spinner" class="hidden items-center gap-1.5 text-xs text-slate-500">
                     <svg class="animate-spin w-3.5 h-3.5 text-red-600" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
@@ -578,6 +621,7 @@
         <div class="modal-title">➕ Ajouter des ménages à la sélection</div>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800">
             Les ménages ajoutés seront pris <b>hors de la sélection existante</b> (pas de doublons).
+            Si vous spécifiez un village ou une grappe, seuls les ménages de cette zone seront candidats.
         </div>
         <form method="POST" action="{{ route('ae.selection.add-more') }}" class="space-y-4">
             @csrf
@@ -588,6 +632,46 @@
                     <option value="PD">PERMANET DUAL (PD)</option>
                     <option value="G2">INTERCEPTOR G2 (G2)</option>
                 </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="form-label">
+                        Village
+                        <span class="text-slate-400 font-normal">(optionnel)</span>
+                    </label>
+                    <select name="village" id="add-village" class="form-select">
+                        <option value="">Tous les villages</option>
+                        <option value="AD">Agbondjedo</option>
+                        <option value="AG">Agao</option>
+                        <option value="AK">Akoba</option>
+                        <option value="DJ">Djigbe</option>
+                        <option value="GB">Gbonou</option>
+                        <option value="MI">Miniffi</option>
+                        <option value="DO">Dogbo</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label">
+                        Grappe
+                        <span class="text-slate-400 font-normal">(optionnel)</span>
+                    </label>
+                    <select name="cluster_id" id="add-cluster" class="form-select">
+                        <option value="">Toutes les grappes</option>
+                        <option value="1">Djigbe 1</option>
+                        <option value="2">Djigbe 2</option>
+                        <option value="3">Gbonou 1</option>
+                        <option value="4">Gbonou 2</option>
+                        <option value="5">Gbonou 3</option>
+                        <option value="6">Miniffi 1</option>
+                        <option value="7">Miniffi 2</option>
+                        <option value="8">Miniffi 3</option>
+                        <option value="9">Miniffi 4</option>
+                        <option value="10">Dogbo / Grappe 1</option>
+                        <option value="11">Agao / Grappe 1</option>
+                        <option value="12">Akoba / Grappe 1</option>
+                        <option value="13">Agbondjedo 2</option>
+                    </select>
+                </div>
             </div>
             <div>
                 <label class="form-label">Nombre de ménages à ajouter</label>
@@ -724,6 +808,42 @@ function toggleCompleted(id, btn) {
 document.getElementById('confirm-reset')?.addEventListener('change', function() {
     document.getElementById('btn-reset').style.opacity = this.checked ? '1' : '.4';
 });
+
+// ── Cascade village → grappe dans le modal "Ajouter des ménages" ──────────────
+(function () {
+    const VILLAGE_CLUSTERS = {
+        'DJ': [[1,'Djigbe 1'],[2,'Djigbe 2']],
+        'GB': [[3,'Gbonou 1'],[4,'Gbonou 2'],[5,'Gbonou 3']],
+        'MI': [[6,'Miniffi 1'],[7,'Miniffi 2'],[8,'Miniffi 3'],[9,'Miniffi 4']],
+        'DO': [[10,'Dogbo / Grappe 1']],
+        'AG': [[11,'Agao / Grappe 1']],
+        'AK': [[12,'Akoba / Grappe 1']],
+        'AD': [[13,'Agbondjedo 2']],
+    };
+    const ALL_CLUSTERS = [
+        [1,'Djigbe 1'],[2,'Djigbe 2'],
+        [3,'Gbonou 1'],[4,'Gbonou 2'],[5,'Gbonou 3'],
+        [6,'Miniffi 1'],[7,'Miniffi 2'],[8,'Miniffi 3'],[9,'Miniffi 4'],
+        [10,'Dogbo / Grappe 1'],[11,'Agao / Grappe 1'],[12,'Akoba / Grappe 1'],
+        [13,'Agbondjedo 2'],
+    ];
+
+    const villageEl  = document.getElementById('add-village');
+    const clusterEl  = document.getElementById('add-cluster');
+    if (!villageEl || !clusterEl) return;
+
+    villageEl.addEventListener('change', function () {
+        const clusters = this.value ? VILLAGE_CLUSTERS[this.value] : ALL_CLUSTERS;
+        clusterEl.innerHTML = '<option value="">Toutes les grappes</option>';
+        clusters.forEach(function ([id, label]) {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = label;
+            clusterEl.appendChild(opt);
+        });
+        if (clusters.length === 1) clusterEl.value = clusters[0][0];
+    });
+})();
 </script>
 </body>
 </html>

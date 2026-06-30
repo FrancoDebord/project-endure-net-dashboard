@@ -204,7 +204,7 @@
                         </div>
                     </div>
                 </div>
-                <div>
+                <div class="mb-4">
                     <p class="village-head">Akoba</p>
                     <div class="flex flex-wrap gap-2">
                         <div>
@@ -212,6 +212,18 @@
                                    id="cl12" class="cb-item" checked>
                             <label for="cl12" class="chip-label">
                                 <span class="dot"></span>Grappe 1
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <p class="village-head">Agbondjedo</p>
+                    <div class="flex flex-wrap gap-2">
+                        <div>
+                            <input type="checkbox" name="selection[]" value="13"
+                                   id="cl13" class="cb-item" checked>
+                            <label for="cl13" class="chip-label">
+                                <span class="dot"></span>Grappe 2
                             </label>
                         </div>
                     </div>
@@ -228,7 +240,7 @@
                                        id="vil_{{ $vil }}" class="cb-item" checked>
                                 <label for="vil_{{ $vil }}" class="chip-label">
                                     <span class="dot"></span>
-                                    {{ ['DJ'=>'Djigbe','GB'=>'Gbonou','MI'=>'Miniffi','DO'=>'Dogbo','AG'=>'Agao','AK'=>'Akoba','1'=>'Djigbe','2'=>'Gbonou','3'=>'Miniffi'][$vil] ?? $vil }}
+                                    {{ ['DJ'=>'Djigbe','GB'=>'Gbonou','MI'=>'Miniffi','DO'=>'Dogbo','AG'=>'Agao','AK'=>'Akoba','AD'=>'Agbondjedo','1'=>'Djigbe','2'=>'Gbonou','3'=>'Miniffi'][$vil] ?? $vil }}
                                 </label>
                             </div>
                         @endforeach

@@ -69,6 +69,8 @@ body {
 .tbl tbody tr.ua-visited td { color:#14532D; }
 .tbl tbody tr.ae-visited-only { background:#EFF6FF; }
 .tbl tbody tr.ae-visited-only td { color:#1E3A5F; }
+.tbl tbody tr.row-absent { background:#FFF7ED; }
+.tbl tbody tr.row-absent td { color:#7C2D12; }
 
 .tbl tbody td {
     padding:4px 5px; font-size:7.5px; vertical-align:top;
@@ -105,6 +107,8 @@ body {
 .cb-label-ok  { color:#15803D; }
 .cb-label-pnd { color:#92400E; }
 .cb-label-no  { color:#CBD5E1; }
+.cb-label-abs { color:#C2410C; }
+.cb-absent    { background:#FED7AA; color:#9A3412; border-color:#FB923C; }
 
 /* ── BADGES ── */
 .badge { border-radius:3px; padding:1px 4px; font-size:6.5px; font-weight:bold; white-space:nowrap; }
@@ -129,8 +133,13 @@ body {
         <div class="header-title">Acceptabilité &amp; Adverse Events — Cohorte A</div>
         <div class="header-sub">
             Suivi des visites par ménage
-            @if($arm)     &nbsp;·&nbsp; Bras : <b>{{ $armLabels[$arm] ?? $arm }}</b> @endif
-            @if($cluster ?? null) &nbsp;·&nbsp; <b>{{ $clusterLabel }}</b> @endif
+            @if($arm ?? null)                  &nbsp;·&nbsp; Bras : <b>{{ $armLabels[$arm] ?? $arm }}</b> @endif
+            @if($cluster ?? null)              &nbsp;·&nbsp; <b>{{ $clusterLabel }}</b> @endif
+            @if(($filters['ua_status'] ?? '')) &nbsp;·&nbsp; UA : <b>{{ match($filters['ua_status']) { 'visited' => 'Visités', 'pending' => 'En attente', 'absent' => 'Absents', default => $filters['ua_status'] } }}</b> @endif
+            @if(($filters['ae_status'] ?? '')) &nbsp;·&nbsp; AE : <b>{{ match($filters['ae_status']) { 'selected' => 'Sélectionnés', 'visited' => 'Visités', 'pending' => 'En attente', 'absent' => 'Absents', 'none' => 'Non sélectionnés', default => $filters['ae_status'] } }}</b> @endif
+            @if(($filters['search'] ?? ''))    &nbsp;·&nbsp; Recherche : <b>"{{ $filters['search'] }}"</b> @endif
+            @if(($filters['tablet'] ?? ''))       &nbsp;·&nbsp; Tablette : <b>{{ $filters['tablet'] }}</b> @endif
+            @if(($filters['visit_status'] ?? '')) &nbsp;·&nbsp; Visites : <b>{{ match($filters['visit_status']) { 'pending' => 'Non visités (UA ou AE)', 'done' => 'Tout visité', 'absent' => 'Absents (UA ou AE)', default => $filters['visit_status'] } }}</b> @endif
         </div>
     </td>
     <td class="header-meta-cell">
@@ -172,9 +181,9 @@ body {
 @foreach($grouped as $clusterId => $clusterHouseholds)
 @php
     $clusterLabel = $clusterDisplay[$clusterId] ?? 'Grappe '.$clusterId;
-    $uaCount = $clusterHouseholds->count();
+    $uaCount = $clusterHouseholds->filter(fn($h) => $h['in_acceptabilite'] ?? false)->count();
     $uaDone  = $clusterHouseholds->where('ua_visited', true)->count();
-    $aeCount = $clusterHouseholds->where('is_ae_selected', true)->count();
+    $aeCount = $clusterHouseholds->filter(fn($h) => $h['in_ae'] ?? $h['is_ae_selected'] ?? false)->count();
     $aeDone  = $clusterHouseholds->where('ae_visited', true)->count();
     $rowN    = 0;
 @endphp
@@ -183,7 +192,7 @@ body {
     <div class="grappe-title">
         {{ $clusterLabel }}
         <span style="font-weight:normal;color:#64748B;font-size:7.5px">
-            — {{ $uaCount }} ménage(s) ·
+            — {{ $clusterHouseholds->count() }} ménage(s) ·
             Accept. {{ $uaDone }}/{{ $uaCount }} ·
             AE {{ $aeDone }}/{{ $aeCount }}
         </span>
@@ -208,9 +217,12 @@ body {
         @foreach($clusterHouseholds->sortBy(['arm','household_id']) as $hh)
         @php
             $rowN++;
-            $rowClass = $hh['ua_visited']
-                ? 'ua-visited'
-                : ($hh['ae_visited'] ? 'ae-visited-only' : ($rowN % 2 === 0 ? 'even' : 'odd'));
+            $isAbsent = ($hh['ua_absent'] ?? false) || ($hh['ae_absent'] ?? false);
+            $rowClass = $isAbsent
+                ? 'row-absent'
+                : ($hh['ua_visited']
+                    ? 'ua-visited'
+                    : ($hh['ae_visited'] ? 'ae-visited-only' : ($rowN % 2 === 0 ? 'even' : 'odd')));
         @endphp
         <tr class="{{ $rowClass }}" style="page-break-inside:avoid">
             <td class="col-num">{{ $rowN }}</td>
@@ -244,7 +256,12 @@ body {
 
             {{-- Acceptabilité --}}
             <td class="col-cb td-center">
-                @if($hh['ua_visited'])
+                @if(!($hh['in_acceptabilite'] ?? true))
+                <span class="cb-label cb-label-no" style="opacity:.35">—</span>
+                @elseif($hh['ua_absent'])
+                <span class="cb cb-absent">✗</span>
+                <span class="cb-label cb-label-abs">Absent</span>
+                @elseif($hh['ua_visited'])
                 <span class="cb cb-checked">✓</span>
                 <span class="cb-label cb-label-ok">Visité</span>
                 @else
@@ -256,7 +273,10 @@ body {
             {{-- Adverse Event --}}
             <td class="col-cb td-center">
                 @if($hh['is_ae_selected'])
-                    @if($hh['ae_visited'])
+                    @if($hh['ae_absent'])
+                    <span class="cb cb-absent">✗</span>
+                    <span class="cb-label cb-label-abs">Absent</span>
+                    @elseif($hh['ae_visited'])
                     <span class="cb cb-checked">✓</span>
                     <span class="cb-label cb-label-ok">Visité</span>
                     @else

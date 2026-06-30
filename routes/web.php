@@ -45,16 +45,18 @@ Route::middleware('auth')->group(function () {
     Route::get('/rapport/bras/pdf', [RapportBrasController::class, 'pdf'])->name('rapport.bras.pdf');
 
     // Inspections KoboToolbox
-    Route::get('/inspections',              [InspectionController::class, 'index'])->name('inspections');
-    Route::get('/inspections/export',       [InspectionController::class, 'export'])->name('inspections.export');
-    Route::post('/inspections/refresh',     [InspectionController::class, 'clearCache'])->name('inspections.refresh');
+    Route::get('/inspections',                    [InspectionController::class, 'index'])->name('inspections');
+    Route::get('/inspections/export',             [InspectionController::class, 'export'])->name('inspections.export');
+    Route::get('/inspections/charts/excel',       [InspectionController::class, 'exportChartsExcel'])->name('inspections.charts.excel');
+    Route::post('/inspections/refresh',           [InspectionController::class, 'clearCache'])->name('inspections.refresh');
 
     // Documentation
     Route::get('/docs', fn() => view('docs'))->name('docs');
 
     // Acceptabilité (Cohorte A — UA + AE tracking)
-    Route::get('/acceptabilite',     [AcceptabiliteController::class, 'index'])->name('acceptabilite.index');
-    Route::get('/acceptabilite/pdf', [AcceptabiliteController::class, 'pdf'])->name('acceptabilite.pdf');
+    Route::get('/acceptabilite',                    [AcceptabiliteController::class, 'index'])->name('acceptabilite.index');
+    Route::get('/acceptabilite/pdf',                [AcceptabiliteController::class, 'pdf'])->name('acceptabilite.pdf');
+    Route::get('/acceptabilite/rapport-journalier', [AcceptabiliteController::class, 'rapportJournalierPdf'])->name('acceptabilite.rapport.pdf');
 
     // Sélection AE (tirage aléatoire stratifié)
     Route::get('/adverse-events/selection',              [AdverseEventsSelectionController::class, 'index'])->name('ae.selection.index');

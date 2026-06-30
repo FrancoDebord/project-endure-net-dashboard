@@ -18,10 +18,12 @@ class AdverseEventsSelectionController extends Controller
     private const ARM_COLORS = ['PD' => '#5B21B6',       'G2' => '#0369A1'];
 
     private const CLUSTER_DISPLAY = [
-        '1'  => 'Djigbe 1',  '2'  => 'Djigbe 2',
-        '3'  => 'Gbonou 1',  '4'  => 'Gbonou 2',  '5'  => 'Gbonou 3',
-        '6'  => 'Miniffi 1', '7'  => 'Miniffi 2', '8'  => 'Miniffi 3', '9' => 'Miniffi 4',
-        '10' => 'Dogbo',     '11' => 'Agao',       '12' => 'Akoba',
+        '1'  => 'Djigbe 1',     '2'  => 'Djigbe 2',
+        '3'  => 'Gbonou 1',     '4'  => 'Gbonou 2',     '5'  => 'Gbonou 3',
+        '6'  => 'Miniffi 1',    '7'  => 'Miniffi 2',    '8'  => 'Miniffi 3',
+        '9'  => 'Miniffi / Grappe 4',
+        '10' => 'Dogbo / Grappe 1',  '11' => 'Agao / Grappe 1',  '12' => 'Akoba / Grappe 1',
+        '13' => 'Agbondjedo 2',
     ];
 
     private const VILLAGE_LABELS = [
@@ -31,6 +33,7 @@ class AdverseEventsSelectionController extends Controller
         'GB' => 'Gbonou',
         'MI' => 'Miniffi',
         'DO' => 'Dogbo',
+        'AD' => 'Agbondjedo',
     ];
 
     public function __construct(private RedCapService $redcap) {}
@@ -63,6 +66,10 @@ class AdverseEventsSelectionController extends Controller
                     ->orWhere('contact_name', 'like', $q)
                     ->orWhere('numero_menage', 'like', $q);
             });
+        }
+        if ($request->filled('tablet')) {
+            $tab = str_pad($request->tablet, 2, '0', STR_PAD_LEFT);
+            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(household_id, '-', 4), '-', -1) = ?", [$tab]);
         }
 
         $households = $query
@@ -150,12 +157,14 @@ class AdverseEventsSelectionController extends Controller
     public function addMore(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'arm'   => 'required|in:PD,G2',
-            'count' => 'required|integer|min:1|max:200',
-            'notes' => 'nullable|string|max:500',
+            'arm'        => 'required|in:PD,G2',
+            'count'      => 'required|integer|min:1|max:200',
+            'village'    => 'nullable|in:AG,AK,DJ,GB,MI,DO',
+            'cluster_id' => 'nullable|integer|between:1,12',
+            'notes'      => 'nullable|string|max:500',
         ]);
 
-        $arm  = $validated['arm'];
+        $arm   = $validated['arm'];
         $count = (int) $validated['count'];
 
         $existingIds = AeSelectedHousehold::where('arm', $arm)
@@ -164,20 +173,28 @@ class AdverseEventsSelectionController extends Controller
 
         $addable = $this->stratifiedSample(
             $this->buildEligiblePool()
-                ->filter(fn($h) => $h['arm'] === $arm && !$existingIds->has($h['household_id']))
+                ->filter(function ($h) use ($arm, $existingIds, $validated) {
+                    if ($h['arm'] !== $arm) return false;
+                    if ($existingIds->has($h['household_id'])) return false;
+                    if (!empty($validated['village'])    && $h['village']    !== $validated['village'])    return false;
+                    if (!empty($validated['cluster_id']) && $h['cluster_id'] != $validated['cluster_id'])  return false;
+                    return true;
+                })
                 ->values(),
             $count
         );
 
         if ($addable->isEmpty()) {
-            return back()->with('error', 'Aucun ménage supplémentaire disponible pour ce bras.');
+            $geoMsg = $this->geoLabel($validated);
+            return back()->with('error', "Aucun ménage supplémentaire disponible pour ce bras{$geoMsg}.");
         }
 
+        $geoNote = $this->geoLabel($validated);
         $run = AeSelectionRun::create([
             'arm'            => $arm,
             'target_count'   => $count,
             'selected_count' => $addable->count(),
-            'notes'          => 'Ajout complémentaire. ' . ($validated['notes'] ?? ''),
+            'notes'          => trim("Ajout complémentaire{$geoNote}. " . ($validated['notes'] ?? '')),
             'created_by'     => auth()->id(),
         ]);
 
@@ -192,8 +209,21 @@ class AdverseEventsSelectionController extends Controller
             );
         }
 
+        $geoMsg = $this->geoLabel($validated);
         return redirect()->route('ae.selection.index')
-            ->with('success', "{$addable->count()} ménage(s) supplémentaire(s) ajouté(s) pour " . self::ARM_LABELS[$arm] . ".");
+            ->with('success', "{$addable->count()} ménage(s) ajouté(s) pour " . self::ARM_LABELS[$arm] . "{$geoMsg}.");
+    }
+
+    private function geoLabel(array $validated): string
+    {
+        $parts = [];
+        if (!empty($validated['village'])) {
+            $parts[] = self::VILLAGE_LABELS[$validated['village']] ?? $validated['village'];
+        }
+        if (!empty($validated['cluster_id'])) {
+            $parts[] = self::CLUSTER_DISPLAY[$validated['cluster_id']] ?? ('Grappe ' . $validated['cluster_id']);
+        }
+        return $parts ? ' — ' . implode(' / ', $parts) : '';
     }
 
     // ── POST /adverse-events/selection/reset ───────────────────────────────────
@@ -254,6 +284,19 @@ class AdverseEventsSelectionController extends Controller
         if ($request->filled('cohort'))  $query->where('study_cohort', $request->cohort);
         if ($request->filled('status')) {
             $query->where('form_completed', $request->status === 'completed');
+        }
+        if ($request->filled('search')) {
+            $q = '%' . $request->search . '%';
+            $query->where(function ($sub) use ($q) {
+                $sub->where('household_id', 'like', $q)
+                    ->orWhere('head_name', 'like', $q)
+                    ->orWhere('contact_name', 'like', $q)
+                    ->orWhere('numero_menage', 'like', $q);
+            });
+        }
+        if ($request->filled('tablet')) {
+            $tab = str_pad($request->tablet, 2, '0', STR_PAD_LEFT);
+            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(household_id, '-', 4), '-', -1) = ?", [$tab]);
         }
 
         $rows = $query
@@ -364,6 +407,19 @@ class AdverseEventsSelectionController extends Controller
                 default   => null,
             };
         }
+        if ($request->filled('search')) {
+            $q = '%' . $request->search . '%';
+            $query->where(function ($sub) use ($q) {
+                $sub->where('household_id', 'like', $q)
+                    ->orWhere('head_name', 'like', $q)
+                    ->orWhere('contact_name', 'like', $q)
+                    ->orWhere('numero_menage', 'like', $q);
+            });
+        }
+        if ($request->filled('tablet')) {
+            $tab = str_pad($request->tablet, 2, '0', STR_PAD_LEFT);
+            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(household_id, '-', 4), '-', -1) = ?", [$tab]);
+        }
 
         $households = $query
             ->orderBy('arm')
@@ -374,7 +430,7 @@ class AdverseEventsSelectionController extends Controller
             ->get();
 
         $stats         = $this->buildStats($aeVisitedIds);
-        $filters       = $request->only(['arm', 'village', 'cluster', 'dag', 'cohort', 'status']);
+        $filters       = $request->only(['arm', 'village', 'cluster', 'dag', 'cohort', 'status', 'search', 'tablet']);
         $villageLabels = self::VILLAGE_LABELS;
         $clusterLabels = self::CLUSTER_DISPLAY;
 
@@ -563,12 +619,15 @@ class AdverseEventsSelectionController extends Controller
         $allIds   = AeSelectedHousehold::pluck('household_id')->flip();
         $visited  = $aeVisitedIds->intersectByKeys($allIds)->count();
 
-        $byArm = [];
+        $byArm     = [];
+        $netsTotal = 0;
         foreach (['PD', 'G2'] as $arm) {
-            $t       = AeSelectedHousehold::where('arm', $arm)->count();
-            $d       = AeSelectedHousehold::where('arm', $arm)->where('form_completed', true)->count();
-            $armIds  = AeSelectedHousehold::where('arm', $arm)->pluck('household_id')->flip();
+            $t          = AeSelectedHousehold::where('arm', $arm)->count();
+            $d          = AeSelectedHousehold::where('arm', $arm)->where('form_completed', true)->count();
+            $armIds     = AeSelectedHousehold::where('arm', $arm)->pluck('household_id')->flip();
             $armVisited = $aeVisitedIds->intersectByKeys($armIds)->count();
+            $armNets    = (int) AeSelectedHousehold::where('arm', $arm)->sum('nb_moustiquaires_etude');
+            $netsTotal += $armNets;
             $byArm[$arm] = [
                 'label'          => self::ARM_LABELS[$arm],
                 'color'          => self::ARM_COLORS[$arm],
@@ -579,6 +638,8 @@ class AdverseEventsSelectionController extends Controller
                 'redcap_visited' => $armVisited,
                 'redcap_pending' => $t - $armVisited,
                 'redcap_rate'    => $t > 0 ? round($armVisited / $t * 100, 1) : 0,
+                'nets_total'     => $armNets,
+                'nets_avg'       => $t > 0 ? round($armNets / $t, 1) : 0,
             ];
         }
 
@@ -590,6 +651,7 @@ class AdverseEventsSelectionController extends Controller
             'redcap_visited' => $visited,
             'redcap_pending' => $total - $visited,
             'redcap_rate'    => $total > 0 ? round($visited / $total * 100, 1) : 0,
+            'nets_total'     => $netsTotal,
             'by_arm'         => $byArm,
         ];
     }

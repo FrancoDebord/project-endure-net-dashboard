@@ -14,5 +14,13 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (\Throwable $e, \Illuminate\Http\Request $request) {
+            // Leave JSON requests and standard HTTP exceptions (404, 419, 503…) to default handling
+            if ($request->expectsJson()) return null;
+            if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface) return null;
+            if ($e instanceof \Illuminate\Auth\AuthenticationException) return null;
+
+            // All other unhandled exceptions → custom 500 view
+            return response()->view('errors.500', ['exception' => $e], 500);
+        });
     })->create();

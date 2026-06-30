@@ -12,9 +12,12 @@ use Illuminate\View\View;
 class DashboardController extends Controller
 {
     private const CLUSTER_LABELS = [
-        '1' => 'Djigbe / Grappe 1', '2' => 'Djigbe / Grappe 2',
-        '3' => 'Gbonou / Grappe 1', '4' => 'Gbonou / Grappe 2', '5' => 'Gbonou / Grappe 3',
-        '6' => 'Miniffi / Grappe 1','7' => 'Miniffi / Grappe 2','8' => 'Miniffi / Grappe 3',
+        '1'  => 'Djigbe / Grappe 1',    '2'  => 'Djigbe / Grappe 2',
+        '3'  => 'Gbonou / Grappe 1',    '4'  => 'Gbonou / Grappe 2',    '5'  => 'Gbonou / Grappe 3',
+        '6'  => 'Miniffi / Grappe 1',   '7'  => 'Miniffi / Grappe 2',   '8'  => 'Miniffi / Grappe 3',
+        '9'  => 'Miniffi / Grappe 4',
+        '10' => 'Dogbo / Grappe 1',     '11' => 'Agao / Grappe 1',      '12' => 'Akoba / Grappe 1',
+        '13' => 'Agbondjedo / Grappe 2',
     ];
     // Mapping (village, grappe) → cluster key, derived from household ID format
     private const CLUSTER_FROM_ID = [
@@ -27,6 +30,10 @@ class DashboardController extends Controller
         'DJ' => 'Djigbe', '1' => 'Djigbe',
         'GB' => 'Gbonou', '2' => 'Gbonou',
         'MI' => 'Miniffi', '3' => 'Miniffi',
+        'DO' => 'Dogbo',
+        'AG' => 'Agao',
+        'AK' => 'Akoba',
+        'AD' => 'Agbondjedo',
     ];
     private const BRAS_LABELS = ['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'];
     // Cluster global (1-8) → bras : PD si cluster ∈ {1,5,7,8}, G2 si ∈ {2,3,4,6}
@@ -61,8 +68,18 @@ class DashboardController extends Controller
         $village = strtoupper($village);
         $bras    = strtoupper($bras);
 
-        $valid = in_array($village, ['DJ', 'GB', 'MI'])
-              && preg_match('/^0[1-3]$/', $grappe)
+        $allowedGrappes = [
+            'DJ' => ['01', '02'],
+            'GB' => ['01', '02', '03'],
+            'MI' => ['01', '02', '03', '04'],
+            'DO' => ['01'],
+            'AG' => ['01'],
+            'AK' => ['01'],
+            'AD' => ['02'],
+        ];
+
+        $valid = isset($allowedGrappes[$village])
+              && in_array($grappe, $allowedGrappes[$village])
               && in_array($bras, ['PD', 'G2'])
               && preg_match('/^(0[1-9]|1[0-9]|20)$/', $tablette)
               && preg_match('/^\d{3}$/', $menage)
@@ -183,8 +200,9 @@ class DashboardController extends Controller
             case 'ua':
                 $uaRaw   = $this->redcap->getUserAcceptabilityData('user_acceptability_arm_1');
                 $ua24Raw = $this->redcap->getUserAcceptabilityData('suivi_24_mois_arm_1');
-                $data['ua']   = $this->buildUAData($uaRaw, $visits);
-                $data['ua24'] = $this->buildUAData($ua24Raw, $visits);
+                $idMap   = collect($idRaw)->filter(fn($r) => $r['household_id'] !== '')->keyBy('household_id');
+                $data['ua']   = $this->buildUAData($uaRaw, $visits, $idMap);
+                $data['ua24'] = $this->buildUAData($ua24Raw, $visits, $idMap);
                 break;
 
             case 'ae':
@@ -894,21 +912,42 @@ class DashboardController extends Controller
         $netsByTablet = $studyNetsDetail
             ->filter(fn($r) => $r['tablette'] !== '')
             ->groupBy('tablette')->sortKeys()
-            ->map(fn($tNets, $tablet) => [
-                'tablet'     => $tablet,
-                'visited'    => $visitsByTablet->get($tablet, collect())->count(),
-                'consented'  => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
-                'households' => $tNets->groupBy('household_id')->sortKeys()
-                    ->map(fn($hhNets, $hhId) => [
-                        'household_id' => $hhId,
-                        'date_visit'   => $hhNets->first()['date_visit'],
-                        'nets'         => $hhNets->pluck('net_code')->values(),
-                        'total'        => $hhNets->count(),
-                        'bras'         => $hhNets->first()['bras'],
-                        'cohort'       => $hhNets->first()['cohort'],
-                    ])->values(),
-                'total' => $tNets->count(),
-            ])->values();
+            ->map(function ($tNets, $tablet) use ($visitsByTablet, $membersByHh) {
+                $households = $tNets->groupBy('household_id')->sortKeys()
+                    ->map(function ($hhNets, $hhId) use ($membersByHh) {
+                        $total  = $hhNets->count();
+                        $m      = $membersByHh->get($hhId, 0);
+                        $netMin = $m > 0 ? (int) ceil($m / 3) : null;
+                        $netMax = $m > 0 ? (int) ceil($m / 2) : null;
+                        $status = $netMin !== null
+                            ? ($total < $netMin ? 'low' : ($total > $netMax ? 'high' : 'ok'))
+                            : null;
+                        return [
+                            'household_id' => $hhId,
+                            'date_visit'   => $hhNets->first()['date_visit'],
+                            'nets'         => $hhNets->pluck('net_code')->values(),
+                            'total'        => $total,
+                            'bras'         => $hhNets->first()['bras'],
+                            'cohort'       => $hhNets->first()['cohort'],
+                            'members'      => $m,
+                            'net_min'      => $netMin,
+                            'net_max'      => $netMax,
+                            'net_status'   => $status,
+                        ];
+                    })->values();
+                return [
+                    'tablet'    => $tablet,
+                    'visited'   => $visitsByTablet->get($tablet, collect())->count(),
+                    'consented' => $visitsByTablet->get($tablet, collect())->where('consent_accepted', '1')->count(),
+                    'households'=> $households,
+                    'total'     => $tNets->count(),
+                    'net_low'   => $households->filter(fn($h) => $h['net_status'] === 'low')->count(),
+                    'net_high'  => $households->filter(fn($h) => $h['net_status'] === 'high')->count(),
+                    'pd_nets'   => $tNets->where('bras', 'PERMANET DUAL')->count(),
+                    'ig2_nets'  => $tNets->where('bras', 'INTERCEPTOR G2')->count(),
+                    'ig2_marked'=> $tNets->filter(fn($r) => $r['bras'] === 'INTERCEPTOR G2' && $r['net_code'] !== '—')->count(),
+                ];
+            })->values();
 
         $householdDetails = $allHouseholds->map(function ($hh) use ($qb, $membersByHh, $oldNetsByHh, $studyNetsByHh, $visitDataByHh) {
             $id         = $hh['household_id'];
@@ -987,10 +1026,11 @@ class DashboardController extends Controller
         ) + ['netsByBras' => $studyNetsDetail->groupBy('bras')->map->count()];
     }
 
-    private function buildUAData(array $raw, Collection $visits): array
+    private function buildUAData(array $raw, Collection $visits, ?Collection $idMap = null): array
     {
         $records = collect($raw)->filter(fn($r) => $r['household_id'] !== '');
         $total   = $records->unique('household_id')->count();
+        $uniq    = $records->unique('household_id');
 
         $like        = $records->where('net_like', '1')->count();
         $satisfied   = $records->whereIn('net_overall_satisfaction', ['1', '2'])->count();
@@ -1000,21 +1040,31 @@ class DashboardController extends Controller
 
         $satisfactionDist = $records->groupBy('net_overall_satisfaction')
             ->map->count()
-            ->mapWithKeys(fn($c, $k) => [match($k) {
-                '1' => 'Très satisfait', '2' => 'Satisfait',
-                '3' => 'Insatisfait', '4' => 'Très insatisfait', default => "Valeur $k"
+            ->mapWithKeys(fn($c, $k) => [match((string)$k) {
+                '1' => 'Très satisfait',
+                '2' => 'Satisfait',
+                '3' => 'Insatisfait',
+                '4' => 'Très insatisfait',
+                '', '0' => 'Non renseigné',
+                default  => "Valeur $k"
             } => $c]);
 
-        $rows = $records->unique('household_id')->map(function ($r) use ($visits) {
-            $hh         = $visits->firstWhere('household_id', $r['household_id']) ?? [];
-            $brasKey    = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, $hh));
-            $villageKey = ($hh['village'] ?? '') ?: (self::parseHouseholdId($r['household_id'])['village'] ?? '');
+        // ── Rows (fix cohort/village/cluster from household ID when visits data missing) ──
+        $rows = $uniq->map(function ($r) use ($visits, $idMap) {
+            $hhId       = $r['household_id'];
+            $hh         = $visits->firstWhere('household_id', $hhId) ?? [];
+            $idData     = $idMap?->get($hhId, []) ?? [];
+            $parsed     = self::parseHouseholdId($hhId);
+            $brasKey    = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, (array)$hh, ['household_id' => $hhId]));
+            $villageKey = ($hh['village'] ?? '') ?: ($idData['village'] ?? '') ?: ($parsed['village'] ?? '');
+            $clusterKey = self::extractCluster($hh ?: ($idData ?: ['household_id' => $hhId]));
+            $cohortKey  = $hh['study_cohort'] ?? ($idData['study_cohort'] ?? '');
             return [
-                'id'           => $r['household_id'],
+                'id'           => $hhId,
                 'bras'         => self::BRAS_LABELS[$brasKey] ?? '—',
-                'cohort'       => self::COHORT_LABELS[$hh['study_cohort'] ?? ''] ?? '—',
+                'cohort'       => self::COHORT_LABELS[$cohortKey] ?? '—',
                 'village'      => self::VILLAGE_LABELS[$villageKey] ?? '—',
-                'cluster'      => self::CLUSTER_LABELS[self::extractCluster($hh)] ?? '—',
+                'cluster'      => self::CLUSTER_LABELS[$clusterKey] ?? '—',
                 'net_like'     => $r['net_like'] === '1' ? 'Oui' : ($r['net_like'] === '0' ? 'Non' : '—'),
                 'satisfaction' => match($r['net_overall_satisfaction']) {
                     '1' => 'Très satisfait', '2' => 'Satisfait',
@@ -1026,6 +1076,101 @@ class DashboardController extends Controller
             ];
         })->values();
 
+        // ── Respondent role distribution ──
+        $respRoleDefs = [
+            '1' => 'Chef de ménage',
+            '2' => 'Conjoint(e)',
+            '3' => 'Autre membre du ménage âgé de 18 ans ou plus',
+            '4' => 'Aucun des précédents',
+        ];
+        $respRoleDist = $uniq
+            ->filter(fn($r) => ($r['uac_resp_role'] ?? '') !== '')
+            ->groupBy('uac_resp_role')
+            ->map->count()
+            ->mapWithKeys(fn($c, $k) => [($respRoleDefs[(string)$k] ?? "Rôle $k") => $c])
+            ->sortDesc()
+            ->all();
+
+        // ── Importance / adequacy stats ──
+        $importanceLevels = ['1' => 'Très important', '2' => 'Plutôt important', '3' => 'Peu important', '4' => 'Pas important'];
+        $binaryPct = fn(Collection $col, string $f) => [
+            'oui' => $col->where($f, '1')->count(),
+            'non' => $col->where($f, '0')->count(),
+            'total' => $col->filter(fn($r) => in_array($r[$f] ?? '', ['0','1']))->count(),
+        ];
+        $importanceDist = fn(string $f) => $uniq
+            ->filter(fn($r) => ($r[$f] ?? '') !== '')
+            ->groupBy($f)
+            ->map->count()
+            ->mapWithKeys(fn($c, $k) => [($importanceLevels[(string)$k] ?? "Niveau $k") => $c])
+            ->all();
+
+        $importanceStats = [
+            ['label' => 'Design / motif',    'field' => 'net_design_importance',  'type' => 'likert', 'dist' => $importanceDist('net_design_importance')],
+            ['label' => 'Couleur',            'field' => 'net_color_importance',   'type' => 'likert', 'dist' => $importanceDist('net_color_importance')],
+            ['label' => 'Taille',             'field' => 'net_taille_importance',  'type' => 'likert', 'dist' => $importanceDist('net_taille_importance')],
+            ['label' => 'Taille adéquate',    'field' => 'net_size_adequate',      'type' => 'binary', 'dist' => $binaryPct($uniq, 'net_size_adequate')],
+            ['label' => 'Facile à installer', 'field' => 'net_easy_install',       'type' => 'binary', 'dist' => $binaryPct($uniq, 'net_easy_install')],
+            ['label' => 'Facile à utiliser',  'field' => 'net_easy_use',           'type' => 'binary', 'dist' => $binaryPct($uniq, 'net_easy_use')],
+        ];
+
+        // ── Open-ended themes ──
+        $openEndedQuestions = [
+            'use_issues'   => ['label' => 'Problèmes rencontrés', 'themes' => [
+                'Inconfort thermique'    => ['chaud', 'chaleur', 'étouff', 'transpir'],
+                'Taille inadaptée'       => ['taille', 'court', 'étroit', 'petit', 'large', 'dimens'],
+                'Installation difficile' => ['instal', 'accroch', 'suspendr', 'monter', 'fixer', 'tient', 'attach', 'tomber'],
+                'Odeur gênante'          => ['odeur', 'sent', 'mauvais'],
+                'Réaction cutanée'       => ['démang', 'brûl', 'allergi', 'irritat', 'peau', 'picot'],
+                'Déchirures / fragilité' => ['déchir', 'trouer', 'abîm', 'fragile', 'percé', 'trou'],
+                'Efficacité réduite'     => ['moustique', 'pénètre', 'pass', 'protège pas'],
+                'Aucun problème'         => ['aucun', 'rien', 'sans problème', 'pas eu', 'pas de problème'],
+            ]],
+            'best_features' => ['label' => 'Meilleures caractéristiques', 'themes' => [
+                'Protection efficace'     => ['protèg', 'efficace', 'moustique', 'insecte', 'punaise', 'tue', 'chasse'],
+                'Qualité / Solidité'      => ['solid', 'résist', 'durable', 'qualité', 'robuste'],
+                'Confort'                 => ['doux', 'confort', 'frais', 'agréable', 'léger', 'souple'],
+                'Design / Esthétique'     => ['couleur', 'belle', 'jolie', 'joli', 'design', 'beau'],
+                'Taille suffisante'       => ['taille', 'grand', 'spacieux', 'couvre', 'large'],
+                "Facilité d'utilisation"  => ['facile', 'simple', 'pratique'],
+            ]],
+            'improvement'   => ['label' => "Suggestions d'amélioration", 'themes' => [
+                'Taille / dimensions'      => ['taille', 'plus grand', 'plus large', 'agrandir', 'long'],
+                'Couleur / design'         => ['couleur', 'autre couleur', 'blanc', 'bleu', 'design'],
+                'Résistance / Qualité'     => ['solid', 'résistant', 'matériau', 'qualité', 'déchir'],
+                'Confort'                  => ['confort', 'frais', 'doux', 'légèr', 'respir', 'aérer'],
+                "Installation"             => ['installation', 'accrocher', 'suspendre', 'plus facile'],
+                "Efficacité"               => ['efficace', 'moustique', 'insecticid', 'traitement'],
+                'Rien / Satisfait'         => ['aucune', 'rien', 'satisfait', 'content', 'bien', 'pas de suggestion'],
+            ]],
+            'comparison'    => ['label' => 'Comparaison avec autres filets', 'themes' => [
+                'Supérieur aux autres'   => ['meilleur', 'supérieur', 'mieux', 'plus efficace', 'meilleur que'],
+                'Inférieur aux autres'   => ['moins bien', 'inférieur', 'moins efficace', 'moins bon', 'préfère autre', 'ancien meilleur'],
+                'Similaire / Équivalent' => ['pareil', 'même chose', 'similaire', 'équivalent', 'identique', 'comparable'],
+                'Pas de comparaison'     => ['jamais', 'aucun autre', 'pas comparé', 'première fois', 'pas utilisé autre'],
+            ]],
+            'brand_pref'    => ['label' => 'Préférence de marque', 'themes' => [
+                'PERMANET DUAL'        => ['permanet', 'dual', 'vestergaard'],
+                'INTERCEPTOR G2'       => ['interceptor', 'g2', 'basf'],
+                'Pas de préférence'    => ['pas de', 'aucune', 'indifférent', 'peu importe', 'même', 'n\'importe'],
+            ]],
+        ];
+
+        $openEndedThemes = [];
+        foreach ($openEndedQuestions as $key => $def) {
+            $fieldMap = [
+                'use_issues'    => 'net_use_issues',
+                'best_features' => 'net_best_features',
+                'improvement'   => 'net_improvement_suggest',
+                'comparison'    => 'net_comparison_other',
+                'brand_pref'    => 'net_brand_preference',
+            ];
+            $openEndedThemes[$key] = array_merge(
+                ['label' => $def['label']],
+                $this->thematize($uniq, $fieldMap[$key], $def['themes'])
+            );
+        }
+
         // ── Per-arm stats ──
         $visitMap = $visits->filter(fn($v) => ($v['household_id'] ?? '') !== '')->keyBy('household_id');
         $recordsWithArm = $records->map(function ($r) use ($visitMap) {
@@ -1033,59 +1178,236 @@ class DashboardController extends Controller
             $key = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, (array) $hh));
             return array_merge($r, ['_arm' => $key]);
         });
-        $armStats = function (string $arm) use ($recordsWithArm): array {
-            $recs = $recordsWithArm->where('_arm', $arm);
-            $n    = $recs->unique('household_id')->count();
+
+        // Extract fieldMap here so the closure can use it
+        $openEndedFieldMap = [
+            'use_issues'    => 'net_use_issues',
+            'best_features' => 'net_best_features',
+            'improvement'   => 'net_improvement_suggest',
+            'comparison'    => 'net_comparison_other',
+            'brand_pref'    => 'net_brand_preference',
+        ];
+
+        $likeReasonDefs = [
+            'net_like_reason___1'  => 'Le matériau est doux',
+            'net_like_reason___2'  => "J'aime la taille",
+            'net_like_reason___3'  => "J'aime la couleur",
+            'net_like_reason___4'  => 'Efficace contre les moustiques',
+            'net_like_reason___5'  => 'Efficace contre les punaises',
+            'net_like_reason___6'  => 'Solide / résistante',
+            'net_like_reason___7'  => 'Dure longtemps',
+            'net_like_reason___8'  => 'Facile à laver',
+            'net_like_reason___99' => 'Autres raisons',
+        ];
+        $dislikeReasonDefs = [
+            'net_dislike_reason___1'  => 'Trop dure',
+            'net_dislike_reason___2'  => 'Trop petite',
+            'net_dislike_reason___3'  => 'Brûlures / démangeaisons',
+            'net_dislike_reason___4'  => "Mauvaise odeur",
+            'net_dislike_reason___5'  => "N'aime pas la couleur",
+            'net_dislike_reason___6'  => 'Mal aux mains au lavage',
+            'net_dislike_reason___7'  => 'Donne trop chaud',
+            'net_dislike_reason___8'  => 'Se déchire facilement',
+            'net_dislike_reason___9'  => 'Pas efficace vs moustiques',
+            'net_dislike_reason___10' => 'Pas efficace vs insectes',
+            'net_dislike_reason___11' => 'Trop courte',
+            'net_dislike_reason___12' => 'Qualité faible',
+            'net_dislike_reason___13' => "Pas facile à utiliser",
+            'net_dislike_reason___99' => 'Autres raisons',
+        ];
+
+        $armStats = function (string $arm) use (
+            $recordsWithArm, $likeReasonDefs, $dislikeReasonDefs,
+            $respRoleDefs, $importanceLevels, $openEndedQuestions, $openEndedFieldMap
+        ): array {
+            $recs    = $recordsWithArm->where('_arm', $arm);
+            $n       = $recs->unique('household_id')->count();
+
+            $likeRecs    = $recs->where('net_like', '1');
+            $dislikeRecs = $recs->where('net_like', '0');
+            $noContRecs  = $recs->where('net_continue_use', '0');
+
+            $likeReasons = [];
+            foreach ($likeReasonDefs as $field => $label) {
+                $c = $likeRecs->where($field, '1')->count();
+                if ($c > 0) $likeReasons[$label] = $c;
+            }
+            arsort($likeReasons);
+
+            $dislikeReasons = [];
+            foreach ($dislikeReasonDefs as $field => $label) {
+                $c = $dislikeRecs->where($field, '1')->count();
+                if ($c > 0) $dislikeReasons[$label] = $c;
+            }
+            arsort($dislikeReasons);
+
+            $noContReasons = $noContRecs
+                ->pluck('net_continue_no_reason')
+                ->filter(fn($v) => trim((string)$v) !== '')
+                ->map(fn($v) => mb_strtoupper(trim($v)))
+                ->countBy()
+                ->sortDesc()
+                ->all();
+
+            $armUniq = $recs->unique('household_id');
+
+            // Per-arm respondent role distribution
+            $armRespRoleDist = $armUniq
+                ->filter(fn($r) => ($r['uac_resp_role'] ?? '') !== '')
+                ->groupBy('uac_resp_role')
+                ->map->count()
+                ->mapWithKeys(fn($c, $k) => [($respRoleDefs[(string)$k] ?? "Rôle $k") => $c])
+                ->sortDesc()
+                ->all();
+
+            // Per-arm importance / adequacy stats
+            $armBinaryPct = fn(string $f) => [
+                'oui'   => $armUniq->where($f, '1')->count(),
+                'non'   => $armUniq->where($f, '0')->count(),
+                'total' => $armUniq->filter(fn($r) => in_array($r[$f] ?? '', ['0', '1']))->count(),
+            ];
+            $armImpDist = fn(string $f) => $armUniq
+                ->filter(fn($r) => ($r[$f] ?? '') !== '')
+                ->groupBy($f)
+                ->map->count()
+                ->mapWithKeys(fn($c, $k) => [($importanceLevels[(string)$k] ?? "Niveau $k") => $c])
+                ->all();
+            $armImportanceStats = [
+                ['label' => 'Design / motif',    'field' => 'net_design_importance', 'type' => 'likert', 'dist' => $armImpDist('net_design_importance')],
+                ['label' => 'Couleur',           'field' => 'net_color_importance',  'type' => 'likert', 'dist' => $armImpDist('net_color_importance')],
+                ['label' => 'Taille',            'field' => 'net_taille_importance', 'type' => 'likert', 'dist' => $armImpDist('net_taille_importance')],
+                ['label' => 'Taille adéquate',   'field' => 'net_size_adequate',     'type' => 'binary', 'dist' => $armBinaryPct('net_size_adequate')],
+                ['label' => 'Facile à installer','field' => 'net_easy_install',      'type' => 'binary', 'dist' => $armBinaryPct('net_easy_install')],
+                ['label' => 'Facile à utiliser', 'field' => 'net_easy_use',          'type' => 'binary', 'dist' => $armBinaryPct('net_easy_use')],
+            ];
+
+            // Per-arm open-ended themes
+            $armOpenEndedThemes = [];
+            foreach ($openEndedQuestions as $key => $def) {
+                $armOpenEndedThemes[$key] = array_merge(
+                    ['label' => $def['label']],
+                    $this->thematize($armUniq, $openEndedFieldMap[$key], $def['themes'])
+                );
+            }
+
             return [
-                'total'       => $n,
-                'like'        => $recs->where('net_like', '1')->count(),
-                'satisfied'   => $recs->whereIn('net_overall_satisfaction', ['1', '2'])->count(),
-                'continueUse' => $recs->where('net_continue_use', '1')->count(),
-                'recommend'   => $recs->where('net_recommend', '1')->count(),
-                'easyUse'     => $recs->where('net_easy_use', '1')->count(),
+                'total'            => $n,
+                'absent'           => $armUniq->where('ac_hh_present', '0')->count(),
+                'present'          => $armUniq->where('ac_hh_present', '1')->count(),
+                'like'             => $likeRecs->count(),
+                'satisfied'        => $recs->whereIn('net_overall_satisfaction', ['1', '2'])->count(),
+                'continueUse'      => $recs->where('net_continue_use', '1')->count(),
+                'recommend'        => $recs->where('net_recommend', '1')->count(),
+                'easyUse'          => $recs->where('net_easy_use', '1')->count(),
+                'likeReasons'      => $likeReasons,
+                'dislikeReasons'   => $dislikeReasons,
+                'noContReasons'    => $noContReasons,
+                'likeCount'        => $likeRecs->unique('household_id')->count(),
+                'dislikeCount'     => $dislikeRecs->unique('household_id')->count(),
+                'noContCount'      => $noContRecs->unique('household_id')->count(),
+                'contCount'        => $recs->where('net_continue_use', '1')->unique('household_id')->count(),
+                'respRoleDist'     => $armRespRoleDist,
+                'importanceStats'  => $armImportanceStats,
+                'openEndedThemes'  => $armOpenEndedThemes,
             ];
         };
         $byArm = ['PD' => $armStats('1'), 'G2' => $armStats('2')];
 
         // ── Daily tablet activity ──
-        $uaJoined = $records->unique('household_id')
-            ->map(fn($r) => ['tablet' => $r['ac_tablet'] ?? '', 'date' => $r['ac_date_interview'] ?? ''])
-            ->filter(fn($r) => $r['tablet'] !== '' && $r['date'] !== '');
+        // Filter BEFORE unique so that unique() keeps the row that actually has tablet+date data,
+        // not an empty parent row that REDCap sometimes exports first.
+        $uaJoined = $records
+            ->filter(fn($r) => ($r['ac_tablet'] ?? '') !== '' && ($r['ac_date_interview'] ?? '') !== '')
+            ->unique('household_id')
+            ->map(fn($r) => ['tablet' => trim($r['ac_tablet']), 'date' => trim($r['ac_date_interview'])]);
         $allUaDates = $uaJoined->pluck('date')->unique()->sort()->values();
-        $uaTabletActivity = $uaJoined->groupBy('tablet')->map(function ($rows, $tablet) use ($allUaDates) {
-            $perDate = $rows->groupBy('date')->map->count();
+        $uaTabletActivity = $uaJoined->groupBy('tablet')->map(function ($rows, $tablet) {
+            $perDate = $rows->groupBy('date')->map(fn($g) => $g->count());
             return ['tablet' => $tablet, 'par_date' => $perDate->toArray(), 'total' => $rows->count()];
         })->sortKeys()->values();
         $uaTabletDatasets = $uaTabletActivity->map(function ($tab, $i) use ($allUaDates) {
             return [
                 'label' => 'Tablette ' . $tab['tablet'],
-                'data'  => $allUaDates->map(fn($d) => $tab['par_date'][$d] ?? 0)->values()->toArray(),
+                'data'  => $allUaDates->map(fn($d) => (int) ($tab['par_date'][$d] ?? 0))->values()->toArray(),
                 'color' => self::TABLET_COLORS[$i % count(self::TABLET_COLORS)],
             ];
         })->values();
 
         return compact('total', 'like', 'satisfied', 'continueUse', 'recommend', 'easyUse',
-                       'satisfactionDist', 'rows', 'byArm', 'uaTabletActivity', 'allUaDates', 'uaTabletDatasets');
+                       'satisfactionDist', 'rows', 'byArm', 'uaTabletActivity', 'allUaDates', 'uaTabletDatasets',
+                       'respRoleDist', 'importanceStats', 'openEndedThemes');
+    }
+
+    private function thematize(Collection $records, string $field, array $themes): array
+    {
+        $responses = $records
+            ->pluck($field)
+            ->filter(fn($v) => trim((string)$v) !== '')
+            ->values();
+
+        $total = $responses->count();
+        if ($total === 0) return ['total' => 0, 'themes' => [], 'other' => ['count' => 0, 'pct' => 0, 'examples' => []]];
+
+        $themeResults = [];
+        foreach ($themes as $name => $keywords) {
+            $matched = $responses->filter(function ($text) use ($keywords) {
+                $lower = mb_strtolower((string)$text);
+                foreach ($keywords as $kw) {
+                    if (str_contains($lower, mb_strtolower($kw))) return true;
+                }
+                return false;
+            });
+            $themeResults[$name] = [
+                'count'    => $matched->count(),
+                'pct'      => round($matched->count() / $total * 100, 1),
+                'examples' => $matched->take(3)->values()->all(),
+            ];
+        }
+        uasort($themeResults, fn($a, $b) => $b['count'] - $a['count']);
+
+        $otherResponses = $responses->filter(function ($text) use ($themes) {
+            $lower = mb_strtolower((string)$text);
+            foreach ($themes as $keywords) {
+                foreach ($keywords as $kw) {
+                    if (str_contains($lower, mb_strtolower($kw))) return false;
+                }
+            }
+            return true;
+        });
+
+        return [
+            'total'  => $total,
+            'themes' => $themeResults,
+            'other'  => [
+                'count'    => $otherResponses->count(),
+                'pct'      => round($otherResponses->count() / $total * 100, 1),
+                'examples' => $otherResponses->take(3)->values()->all(),
+            ],
+        ];
     }
 
     private function buildAEData(array $raw, Collection $visits): array
     {
         $allRecords = collect($raw)->filter(fn($r) => $r['household_id'] !== '');
 
-        // form_5a (informations génériques — non-répétant) : punaises, etc.
-        $form5a = $allRecords->filter(fn($r) =>
-            $r['redcap_repeat_instrument'] === '' ||
-            $r['redcap_repeat_instrument'] === 'form_5a_informations_gnriques_adverse_events'
-        );
+        // nb_moustiquaires_etude par ménage (form 4b → cache redcap.form4a)
+        $form4aMap = collect($this->redcap->getForm4aData())
+            ->filter(fn($r) => ($r['household_id'] ?? '') !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+            ->keyBy('household_id');
+
+        // form_5a = enregistrements non-répétants (root record, redcap_repeat_instrument vide)
+        $form5a = $allRecords->where('redcap_repeat_instrument', '');
 
         // form_5b (par moustiquaire — répétant) : symptômes, utilisation
         $form5b = $allRecords->where('redcap_repeat_instrument', 'form_5_adverse_avents');
 
-        $total       = $allRecords->unique('household_id')->count();
+        // total = ménages form_5a (enregistrements non-répétants)
+        $form5aRoot  = $allRecords->where('redcap_repeat_instrument', '');
+        $total       = $form5aRoot->unique('household_id')->count();
         $anySymptom  = $form5b->where('ae_any_symptom', '1')->unique('household_id')->count();
         $continueUse = $form5b->where('itn_continue_use', '1')->unique('household_id')->count();
-        $bedbugs     = $form5a->where('bedbugs_current_house', '1')->count();
-        $bbOnNet     = $form5a->where('bb_seen_on_net_ever', '1')->count();
+        $bedbugs     = $form5aRoot->where('bedbugs_current_house', '1')->unique('household_id')->count();
+        $bbOnNet     = $form5aRoot->where('bb_seen_on_net_ever', '1')->unique('household_id')->count();
 
         $symptomFields = [
             'ae_itch_adult'       => 'Démangeaisons',
@@ -1124,22 +1446,178 @@ class DashboardController extends Controller
         })->values();
 
         // ── Per-arm stats ──
-        $visitMap = $visits->filter(fn($v) => ($v['household_id'] ?? '') !== '')->keyBy('household_id');
-        $armFor = function (array $r) use ($visitMap): string {
-            $hh = $visitMap->get($r['household_id'], []);
-            return ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, (array) $hh));
-        };
-        $aeArmStats = function (string $arm) use ($form5a, $form5b, $armFor): array {
-            $a5 = $form5a->filter(fn($r) => $armFor($r) === $arm);
-            $b5 = $form5b->filter(fn($r) => $armFor($r) === $arm);
+        // Source autoritaire : household_ids de AeSelectedHousehold par bras.
+        // Pas d'inférence — on filtre directement par appartenance à la sélection.
+        $pdSelectedIds = \App\Models\AeSelectedHousehold::where('arm', 'PD')->pluck('household_id')->flip();
+        $g2SelectedIds = \App\Models\AeSelectedHousehold::where('arm', 'G2')->pluck('household_id')->flip();
+        $selectedIdsByArm = ['1' => $pdSelectedIds, '2' => $g2SelectedIds];
+
+        $respondentDefs = [
+            '1' => 'Chef de ménage', '2' => 'Conjoint(e)',
+            '3' => 'Autre membre du ménage âgé de 18 ans ou plus', '4' => 'Aucun des précédents',
+        ];
+        $bbActionDefs = [
+            '1' => 'Aucune action', '2' => 'Lavé le filet',
+            '3' => 'Retiré le filet', '4' => 'Traitement anti-punaises', '5' => 'Autre',
+        ];
+        $nonUseReasonDefs = [
+            '1' => 'Trop chaud',          '2' => 'Démangeaisons / Irritations',
+            '3' => 'Mauvaise odeur',      '4' => 'Pas de moustiques',
+            '5' => 'Difficile à installer','6' => 'Défaut du filet', '99' => 'Autre raison',
+        ];
+
+        $aeArmStats = function (string $arm) use ($form5a, $form5b, $selectedIdsByArm, $symptomFields, $respondentDefs, $bbActionDefs, $nonUseReasonDefs): array {
+            $sel    = $selectedIdsByArm[$arm];
+            $a5     = $form5a->filter(fn($r) => $sel->has($r['household_id']));
+            $b5     = $form5b->filter(fn($r) => $sel->has($r['household_id']));
+            $a5Uniq = $a5->unique('household_id');
+            $b5Tot  = $b5->count();
+            $n      = $a5Uniq->count();
+            $pctHh  = fn($v) => $n > 0 ? round($v / $n * 100, 1) : 0;
+            $pctNet = fn($v) => $b5Tot > 0 ? round($v / $b5Tot * 100, 1) : 0;
+
+            // Respondent
+            $respondentDist = $a5Uniq
+                ->filter(fn($r) => ($r['ad_evt_respondent'] ?? '') !== '')
+                ->groupBy('ad_evt_respondent')->map->count()
+                ->mapWithKeys(fn($c, $k) => [($respondentDefs[(string)$k] ?? "Rôle $k") => $c])
+                ->sortDesc()->all();
+
+            // Net presence
+            $itnPresent = $a5Uniq->sum(fn($r) => (int)($r['ae_itn_present_n'] ?? 0));
+            $itnTotal   = $a5Uniq->sum(fn($r) => (int)($r['ae_itn_n'] ?? 0));
+
+            // Bedbug locations (binary checkboxes)
+            $bbLocDefs = [
+                'Première utilisation' => 'bedbug_seen_first_use',
+                'Ancien filet'         => 'bb_net_old',
+                'Cadre du lit'         => 'bb_bed_frame',
+                'Literie'              => 'bb_bed_linen',
+                'Matelas'              => 'bb_mattress',
+                'Vêtements'            => 'bb_clothing',
+                'Murs / sol'           => 'bb_walls_floor',
+                'Bagages'              => 'bb_luggage',
+                'Autre'                => 'bb_other_specify',
+            ];
+            $bbLocations = [];
+            foreach ($bbLocDefs as $label => $field) {
+                $c = $a5Uniq->where($field, '1')->count();
+                if ($c > 0) $bbLocations[$label] = ['count' => $c, 'pct' => $pctHh($c)];
+            }
+            uasort($bbLocations, fn($a, $b) => $b['count'] - $a['count']);
+
+            // BB net influence
+            $bbNetEff    = $a5Uniq->where('bb_net_eff_att', '1')->count();
+            $bbSeenOnNet = $a5Uniq->where('bb_seen_on_net_ever', '1')->count();
+            $bbStopNet   = $a5Uniq->where('bb_stop_net_use_ever', '1')->count();
+            $bbActionDist = $a5Uniq
+                ->filter(fn($r) => ($r['bb_net_action'] ?? '') !== '')
+                ->groupBy('bb_net_action')->map->count()
+                ->mapWithKeys(fn($c, $k) => [($bbActionDefs[(string)$k] ?? "Action $k") => $c])
+                ->sortDesc()->all();
+
+            // Net-level symptoms
+            $ageClassDefs = ['1' => 'Adulte', '2' => 'Enfant (< 18 ans)', '3' => 'Femme enceinte'];
+            $symDetails = [];
+            foreach ($symptomFields as $field => $label) {
+                $sympRecs = $b5->where($field, '1');
+                $count    = $sympRecs->count();
+                $ageBase  = str_replace('_adult', '_adult_age', $field);
+                $ageCounts = [];
+                foreach ($ageClassDefs as $n => $ageLabel) {
+                    $c = $sympRecs->where($ageBase . '___' . $n, '1')->count();
+                    if ($c > 0) $ageCounts[$ageLabel] = $c;
+                }
+                $symDetails[$field] = [
+                    'label'     => $label,
+                    'count'     => $count,
+                    'pct'       => $pctNet($count),
+                    'ageCounts' => $ageCounts,
+                ];
+            }
+
+            // Other symptoms (free text)
+            $otherSymptoms = $b5->pluck('ae_other_symptom')
+                ->filter(fn($v) => trim((string)$v) !== '')
+                ->map(fn($v) => mb_strtoupper(trim($v)))
+                ->countBy()->sortDesc()->all();
+
+            // Continue use + non-use reason
+            $continueUseHh = $b5->where('itn_continue_use', '1')->unique('household_id')->count();
+            $nonUseReasonDist = $b5->where('itn_continue_use', '0')
+                ->filter(fn($r) => ($r['itn_nonuse_reason'] ?? '') !== '')
+                ->groupBy('itn_nonuse_reason')->map->count()
+                ->mapWithKeys(fn($c, $k) => [($nonUseReasonDefs[(string)$k] ?? "Raison $k") => $c])
+                ->sortDesc()->all();
+
+            $reportedPhysician = $b5->where('ae_reported_physician', '1')->unique('household_id')->count();
+
+            // Average users per net
+            $avgNetUsers = $b5Tot > 0
+                ? round($b5->avg(fn($r) => is_numeric($r['ae_net_users_n'] ?? '') ? (float)$r['ae_net_users_n'] : 0), 1)
+                : 0;
+
             return [
-                'total'       => $a5->unique('household_id')->count(),
-                'anySymptom'  => $b5->where('ae_any_symptom', '1')->unique('household_id')->count(),
-                'continueUse' => $b5->where('itn_continue_use', '1')->unique('household_id')->count(),
-                'bedbugs'     => $a5->where('bedbugs_current_house', '1')->count(),
+                'total'             => $n,
+                'hhWithNets'        => $b5->unique('household_id')->count(),
+                'anySymptom'        => $b5->where('ae_any_symptom', '1')->unique('household_id')->count(),
+                'continueUse'       => $continueUseHh,
+                'bedbugs'           => $a5Uniq->where('bedbugs_current_house', '1')->unique('household_id')->count(),
+                'respondentDist'    => $respondentDist,
+                'itnPresent'        => $itnPresent,
+                'itnTotal'          => $itnTotal,
+                'bbCommunity'       => $a5Uniq->where('bedbugs_community_problem', '1')->count(),
+                'bbLocations'       => $bbLocations,
+                'bbNetEff'          => $bbNetEff,
+                'bbSeenOnNet'       => $bbSeenOnNet,
+                'bbStopNet'         => $bbStopNet,
+                'bbActionDist'      => $bbActionDist,
+                'netCount'          => $b5Tot,
+                'avgNetUsers'       => $avgNetUsers,
+                'symDetails'        => $symDetails,
+                'otherSymptoms'     => $otherSymptoms,
+                'nonUseReasonDist'  => $nonUseReasonDist,
+                'reportedPhysician' => $reportedPhysician,
             ];
         };
         $byArm = ['PD' => $aeArmStats('1'), 'G2' => $aeArmStats('2')];
+
+        // ── Per-arm symptom breakdown + net-level symptom rate + absent stats ──
+        $symptomsByArm = [];
+        $absentByArm   = [];
+        foreach (['PD' => '1', 'G2' => '2'] as $armKey => $armCode) {
+            $sel   = $selectedIdsByArm[$armCode];
+            $a5arm = $form5a->filter(fn($r) => $sel->has($r['household_id']));
+            $b5arm = $form5b->filter(fn($r) => $sel->has($r['household_id']));
+
+            $armSymptoms = collect($symptomFields)->map(fn($label, $field) => [
+                'label' => $label,
+                'count' => $b5arm->where($field, '1')->count(),
+            ])->values();
+
+            $b5armTotal  = $b5arm->count();
+            $b5armSymp   = $b5arm->where('ae_any_symptom', '1')->count();
+            $netSympRate = $b5armTotal > 0 ? round($b5armSymp / $b5armTotal * 100, 1) : 0;
+
+            $symptomsByArm[$armKey] = [
+                'symptoms'    => $armSymptoms,
+                'netTotal'    => $b5armTotal,
+                'netWithSymp' => $b5armSymp,
+                'netSympRate' => $netSympRate,
+            ];
+
+            $selectedTotal  = $sel->count();
+            $presentHhIds   = $a5arm->where('ae_hh_present', '1')->pluck('household_id')->unique();
+            $absentHhIds    = $a5arm->where('ae_hh_present', '0')->pluck('household_id')->unique()->diff($presentHhIds);
+            $netsExpected   = $sel->keys()->sum(fn($id) => (int)($form4aMap->get($id, [])['nb_moustiquaires_etude'] ?? 0));
+            $absentByArm[$armKey] = [
+                'selected'      => $selectedTotal,
+                'present'       => $presentHhIds->count(),
+                'absent'        => $absentHhIds->count(),
+                'nets_expected' => $netsExpected,
+                'nets_followed' => $b5arm->count(),
+            ];
+        }
 
         // ── Daily tablet activity ──
         $aeJoined = $form5a
@@ -1159,7 +1637,8 @@ class DashboardController extends Controller
         })->values();
 
         return compact('total', 'anySymptom', 'continueUse', 'bedbugs', 'bbOnNet',
-                       'symptomCounts', 'rows', 'byArm', 'aeTabletActivity', 'allAeDates', 'aeTabletDatasets');
+                       'symptomCounts', 'rows', 'byArm', 'aeTabletActivity', 'allAeDates', 'aeTabletDatasets',
+                       'symptomsByArm', 'absentByArm');
     }
 
     private function buildFollowUpData(array $raw, Collection $visits): array

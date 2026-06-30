@@ -253,7 +253,10 @@ body {
                         @elseif($key==='village') Village: {{ $villageLabels[$val] ?? $val }}
                         @elseif($key==='cluster') Grappe: {{ $clusterLabels[$val] ?? $val }}
                         @elseif($key==='dag') DAG: {{ $val }}
+                        @elseif($key==='cohort') Cohorte: {{ $val }}
                         @elseif($key==='status') Statut: {{ $val === 'visited' ? 'Visités (REDCap)' : 'En attente' }}
+                        @elseif($key==='search') Recherche: "{{ $val }}"
+                        @elseif($key==='tablet') Tablette: {{ $val }}
                         @endif
                     </span>
                     @endif

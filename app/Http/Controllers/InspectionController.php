@@ -164,6 +164,228 @@ class InspectionController extends Controller
         ]);
     }
 
+    public function exportChartsExcel(): StreamedResponse
+    {
+        $submissions = $this->kobo->getSubmissions();
+        $viz         = $this->buildVisualInspectionTable($submissions);
+
+        // ── Aggregate per brand ─────────────────────────────────────────────
+        $sums = [];
+        foreach (['PMD', 'IG2'] as $brand) {
+            $s = [
+                'total'    => 0,
+                'fabric'   => ['avec_trous' => 0, 'sans_trous' => 0, 'taille1' => 0, 'taille2' => 0, 'taille3' => 0, 'taille4' => 0],
+                'colour'   => ['decolore' => 0, 'bon' => 0],
+                'symmetry' => [],
+                'tache'    => ['avec' => 0, 'sans' => 0],
+                'overall'  => [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0],
+            ];
+            foreach ($viz[$brand] ?? [] as $r) {
+                $s['total'] += $r['total'];
+                foreach ($r['fabric'] as $k => $v)   { $s['fabric'][$k] += $v; }
+                $s['colour']['decolore'] += $r['colour']['decolore'];
+                $s['colour']['bon']      += $r['colour']['bon'];
+                foreach ($r['symmetry'] as $val => $cnt) {
+                    $s['symmetry'][$val] = ($s['symmetry'][$val] ?? 0) + $cnt;
+                }
+                $s['tache']['avec'] += $r['tache']['avec'];
+                $s['tache']['sans'] += $r['tache']['sans'];
+                for ($i = 1; $i <= 5; $i++) { $s['overall'][$i] += ($r['overall'][$i] ?? 0); }
+            }
+            $sums[$brand] = $s;
+        }
+
+        $pct = fn($n, $total): float => $total > 0 ? round($n / $total * 100, 1) : 0.0;
+        $pT  = $sums['PMD']['total'];
+        $iT  = $sums['IG2']['total'];
+
+        // ── PhpSpreadsheet setup ────────────────────────────────────────────
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $spreadsheet->removeSheetByIndex(0);
+
+        $SOLID   = \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID;
+        $CENTER  = \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER;
+        $VCENTER = \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER;
+        $THIN    = \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN;
+
+        $mkHdr = fn(string $rgb) => [
+            'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
+            'fill'      => ['fillType' => $SOLID, 'startColor' => ['rgb' => $rgb]],
+            'alignment' => ['horizontal' => $CENTER, 'vertical' => $VCENTER],
+            'borders'   => ['allBorders' => ['borderStyle' => $THIN, 'color' => ['rgb' => 'CBD5E1']]],
+        ];
+
+        $buildSheet = function (string $title, array $rows, int $pTotal, int $iTotal) use ($spreadsheet, $mkHdr, $SOLID, $CENTER, $THIN): void {
+            $sh = $spreadsheet->createSheet();
+            $sh->setTitle(mb_substr($title, 0, 31));
+
+            $sh->mergeCells('B1:C1');
+            $sh->mergeCells('D1:E1');
+            $sh->setCellValue('A1', 'Indicateur');
+            $sh->setCellValue('B1', 'PMD — PermaNet Dual');
+            $sh->setCellValue('D1', 'IG2 — Interceptor G2');
+            $sh->getStyle('A1')->applyFromArray($mkHdr('1E293B'));
+            $sh->getStyle('B1:C1')->applyFromArray($mkHdr('6D28D9'));
+            $sh->getStyle('D1:E1')->applyFromArray($mkHdr('0369A1'));
+            $sh->getRowDimension(1)->setRowHeight(22);
+
+            foreach (['A2' => '', 'B2' => 'n', 'C2' => '%', 'D2' => 'n', 'E2' => '%'] as $cell => $label) {
+                $sh->setCellValue($cell, $label);
+            }
+            $sh->getStyle('A2:E2')->applyFromArray([
+                'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                'fill'      => ['fillType' => $SOLID, 'startColor' => ['rgb' => '475569']],
+                'alignment' => ['horizontal' => $CENTER],
+                'borders'   => ['allBorders' => ['borderStyle' => $THIN, 'color' => ['rgb' => 'CBD5E1']]],
+            ]);
+
+            $r = 3;
+            foreach ($rows as $idx => [$label, $pN, $pP, $iN, $iP]) {
+                $sh->setCellValue("A{$r}", $label);
+                $sh->setCellValue("B{$r}", $pN);
+                $sh->setCellValue("C{$r}", $pP);
+                $sh->setCellValue("D{$r}", $iN);
+                $sh->setCellValue("E{$r}", $iP);
+                $sh->getStyle("C{$r}")->getNumberFormat()->setFormatCode('0.0"%"');
+                $sh->getStyle("E{$r}")->getNumberFormat()->setFormatCode('0.0"%"');
+                if ($idx % 2 === 1) {
+                    $sh->getStyle("A{$r}:E{$r}")->applyFromArray([
+                        'fill' => ['fillType' => $SOLID, 'startColor' => ['rgb' => 'F8FAFC']],
+                    ]);
+                }
+                $r++;
+            }
+
+            $sh->setCellValue("A{$r}", 'TOTAL');
+            $sh->setCellValue("B{$r}", $pTotal);
+            $sh->setCellValue("C{$r}", '100 %');
+            $sh->setCellValue("D{$r}", $iTotal);
+            $sh->setCellValue("E{$r}", '100 %');
+            $sh->getStyle("A{$r}:E{$r}")->applyFromArray([
+                'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                'fill'      => ['fillType' => $SOLID, 'startColor' => ['rgb' => '334155']],
+                'alignment' => ['horizontal' => $CENTER],
+            ]);
+            $sh->getStyle("A3:E{$r}")->applyFromArray([
+                'borders' => ['allBorders' => ['borderStyle' => $THIN, 'color' => ['rgb' => 'E2E8F0']]],
+            ]);
+            $sh->getColumnDimension('A')->setWidth(33);
+            foreach (['B', 'C', 'D', 'E'] as $col) { $sh->getColumnDimension($col)->setWidth(16); }
+            $sh->freezePane('A3');
+        };
+
+        // ── 1. Intégrité du tissu ───────────────────────────────────────────
+        $buildSheet('Intégrité du tissu', [
+            ['Intactes (sans trous)', $sums['PMD']['fabric']['sans_trous'], $pct($sums['PMD']['fabric']['sans_trous'], $pT), $sums['IG2']['fabric']['sans_trous'], $pct($sums['IG2']['fabric']['sans_trous'], $iT)],
+            ['Avec trous',            $sums['PMD']['fabric']['avec_trous'], $pct($sums['PMD']['fabric']['avec_trous'], $pT), $sums['IG2']['fabric']['avec_trous'], $pct($sums['IG2']['fabric']['avec_trous'], $iT)],
+        ], $pT, $iT);
+
+        // ── 2. Trous par taille ─────────────────────────────────────────────
+        $pHoles = $sums['PMD']['fabric']['taille1'] + $sums['PMD']['fabric']['taille2'] + $sums['PMD']['fabric']['taille3'] + $sums['PMD']['fabric']['taille4'];
+        $iHoles = $sums['IG2']['fabric']['taille1'] + $sums['IG2']['fabric']['taille2'] + $sums['IG2']['fabric']['taille3'] + $sums['IG2']['fabric']['taille4'];
+        $buildSheet('Trous par taille', [
+            ['Petits (< 0.5 cm²)',     $sums['PMD']['fabric']['taille1'], $pct($sums['PMD']['fabric']['taille1'], $pHoles), $sums['IG2']['fabric']['taille1'], $pct($sums['IG2']['fabric']['taille1'], $iHoles)],
+            ['Moyens (0.5 – 2 cm²)',   $sums['PMD']['fabric']['taille2'], $pct($sums['PMD']['fabric']['taille2'], $pHoles), $sums['IG2']['fabric']['taille2'], $pct($sums['IG2']['fabric']['taille2'], $iHoles)],
+            ['Grands (2 – 10 cm²)',    $sums['PMD']['fabric']['taille3'], $pct($sums['PMD']['fabric']['taille3'], $pHoles), $sums['IG2']['fabric']['taille3'], $pct($sums['IG2']['fabric']['taille3'], $iHoles)],
+            ['Très grands (> 10 cm²)', $sums['PMD']['fabric']['taille4'], $pct($sums['PMD']['fabric']['taille4'], $pHoles), $sums['IG2']['fabric']['taille4'], $pct($sums['IG2']['fabric']['taille4'], $iHoles)],
+        ], $pHoles, $iHoles);
+
+        // ── 3. Couleur ──────────────────────────────────────────────────────
+        $buildSheet('Couleur', [
+            ['Bonne couleur', $sums['PMD']['colour']['bon'],      $pct($sums['PMD']['colour']['bon'],      $pT), $sums['IG2']['colour']['bon'],      $pct($sums['IG2']['colour']['bon'],      $iT)],
+            ['Décolorée',     $sums['PMD']['colour']['decolore'], $pct($sums['PMD']['colour']['decolore'], $pT), $sums['IG2']['colour']['decolore'], $pct($sums['IG2']['colour']['decolore'], $iT)],
+        ], $pT, $iT);
+
+        // ── 4. Symétrie ─────────────────────────────────────────────────────
+        $allSymVals = array_unique(array_merge(array_keys($sums['PMD']['symmetry']), array_keys($sums['IG2']['symmetry'])));
+        sort($allSymVals);
+        $pSymTotal = (int) array_sum($sums['PMD']['symmetry']);
+        $iSymTotal = (int) array_sum($sums['IG2']['symmetry']);
+        $symRows = array_map(fn($val) => [
+            (string) $val,
+            $sums['PMD']['symmetry'][$val] ?? 0,
+            $pct($sums['PMD']['symmetry'][$val] ?? 0, $pSymTotal),
+            $sums['IG2']['symmetry'][$val] ?? 0,
+            $pct($sums['IG2']['symmetry'][$val] ?? 0, $iSymTotal),
+        ], $allSymVals);
+        $buildSheet('Symétrie', $symRows, $pSymTotal, $iSymTotal);
+
+        // ── 5. Présence de tache ────────────────────────────────────────────
+        $buildSheet('Présence de tache', [
+            ['Sans tache', $sums['PMD']['tache']['sans'], $pct($sums['PMD']['tache']['sans'], $pT), $sums['IG2']['tache']['sans'], $pct($sums['IG2']['tache']['sans'], $iT)],
+            ['Avec tache', $sums['PMD']['tache']['avec'], $pct($sums['PMD']['tache']['avec'], $pT), $sums['IG2']['tache']['avec'], $pct($sums['IG2']['tache']['avec'], $iT)],
+        ], $pT, $iT);
+
+        // ── 6. État général ─────────────────────────────────────────────────
+        $gradeLabels = [1 => 'Grade 1 — Excellent', 2 => 'Grade 2 — Bon', 3 => 'Grade 3 — Moyen', 4 => 'Grade 4 — Mauvais', 5 => 'Grade 5 — Très mauvais'];
+        $buildSheet('État général', array_map(fn($i) => [
+            $gradeLabels[$i],
+            $sums['PMD']['overall'][$i] ?? 0,
+            $pct($sums['PMD']['overall'][$i] ?? 0, $pT),
+            $sums['IG2']['overall'][$i] ?? 0,
+            $pct($sums['IG2']['overall'][$i] ?? 0, $iT),
+        ], [1, 2, 3, 4, 5]), $pT, $iT);
+
+        // ── 7. Détail par lot-balle ─────────────────────────────────────────
+        $coordFromIdx = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::class . '::stringFromColumnIndex';
+        $dsh          = $spreadsheet->createSheet();
+        $dsh->setTitle('Détail par lot-balle');
+        $dHeaders = ['Bras', 'Lot', 'Balle', 'Position', 'Total', 'Intactes', 'Avec trous', 'T1 (<0.5cm²)', 'T2 (0.5-2cm²)', 'T3 (2-10cm²)', 'T4 (>10cm²)', 'Bonne couleur', 'Décolorée', 'Symétrie', 'Sans tache', 'Avec tache', 'G1', 'G2', 'G3', 'G4', 'G5'];
+        $lastDCol     = $coordFromIdx(count($dHeaders));
+        foreach ($dHeaders as $ci => $h) {
+            $dsh->setCellValue($coordFromIdx($ci + 1) . '1', $h);
+        }
+        $dsh->getStyle('A1:' . $lastDCol . '1')->applyFromArray([
+            'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill'      => ['fillType' => $SOLID, 'startColor' => ['rgb' => '1E293B']],
+            'alignment' => ['horizontal' => $CENTER, 'vertical' => $VCENTER],
+        ]);
+        $dsh->getRowDimension(1)->setRowHeight(20);
+
+        $dr = 2;
+        foreach (['PMD', 'IG2'] as $brand) {
+            foreach ($viz[$brand] ?? [] as $row) {
+                $rowData = [
+                    $brand, $row['lot'], $row['bale'], $row['pos'], $row['total'],
+                    $row['fabric']['sans_trous'], $row['fabric']['avec_trous'],
+                    $row['fabric']['taille1'], $row['fabric']['taille2'],
+                    $row['fabric']['taille3'], $row['fabric']['taille4'],
+                    $row['colour']['bon'], $row['colour']['decolore'],
+                    implode(', ', array_map(fn($k, $v) => "{$k}:{$v}", array_keys($row['symmetry']), $row['symmetry'])),
+                    $row['tache']['sans'], $row['tache']['avec'],
+                    $row['overall'][1] ?? 0, $row['overall'][2] ?? 0, $row['overall'][3] ?? 0, $row['overall'][4] ?? 0, $row['overall'][5] ?? 0,
+                ];
+                foreach ($rowData as $ci => $val) {
+                    $dsh->setCellValue($coordFromIdx($ci + 1) . $dr, $val);
+                }
+                if ($dr % 2 === 0) {
+                    $dsh->getStyle('A' . $dr . ':' . $lastDCol . $dr)->applyFromArray([
+                        'fill' => ['fillType' => $SOLID, 'startColor' => ['rgb' => 'F8FAFC']],
+                    ]);
+                }
+                $dr++;
+            }
+        }
+        foreach (range(1, count($dHeaders)) as $ci) {
+            $dsh->getColumnDimension($coordFromIdx($ci))->setAutoSize(true);
+        }
+        $dsh->freezePane('A2');
+        $dsh->setAutoFilter('A1:' . $lastDCol . '1');
+
+        // ── Stream ──────────────────────────────────────────────────────────
+        $spreadsheet->setActiveSheetIndex(0);
+        $writer   = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $filename = 'analyse-comparative-pmd-ig2-' . now()->format('Y-m-d') . '.xlsx';
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control'       => 'max-age=0',
+        ]);
+    }
+
     public function clearCache(): RedirectResponse
     {
         $this->kobo->clearCache();

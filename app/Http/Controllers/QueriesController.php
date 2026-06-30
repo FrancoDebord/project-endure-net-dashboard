@@ -21,14 +21,15 @@ class QueriesController extends Controller
         'suivi_36_mois_arm_1'       => 'Suivi 36 mois',
     ];
 
-    // Grappe globale (cluster_id 1-8) → numéro relatif au sein du village (2 chiffres)
+    // Grappe globale (cluster_id 1-13) → numéro relatif au sein du village (2 chiffres)
     private const GRAPPE_RELATIVE = [
-        '1'  => '01', '2'  => '02',                        // Djigbe
-        '3'  => '01', '4'  => '02', '5'  => '03',          // Gbonou
-        '6'  => '01', '7'  => '02', '8'  => '03', '9' => '04', // Miniffi
+        '1'  => '01', '2'  => '02',                              // Djigbe
+        '3'  => '01', '4'  => '02', '5'  => '03',               // Gbonou
+        '6'  => '01', '7'  => '02', '8'  => '03', '9'  => '04', // Miniffi
         '10' => '01',  // Dogbo
         '11' => '01',  // Agao
         '12' => '01',  // Akoba
+        '13' => '02',  // Agbondjedo
     ];
     // Bras numérique → code dans l'identifiant
     private const BRAS_CODE = ['1' => 'PD', '2' => 'G2'];
@@ -41,7 +42,18 @@ class QueriesController extends Controller
     private const VILLAGE_CODE = [
         '1' => 'DJ', '2' => 'GB', '3' => 'MI',
         'DJ' => 'DJ', 'GB' => 'GB', 'MI' => 'MI',
-        'DO' => 'DO', 'AG' => 'AG', 'AK' => 'AK',
+        'DO' => 'DO', 'AG' => 'AG', 'AK' => 'AK', 'AD' => 'AD',
+    ];
+
+    // Grappes autorisées par village (dans l'identifiant ménage)
+    private const VILLAGE_ALLOWED_GRAPPES = [
+        'DJ' => ['01', '02'],
+        'GB' => ['01', '02', '03'],
+        'MI' => ['01', '02', '03', '04'],
+        'DO' => ['01'],
+        'AG' => ['01'],
+        'AK' => ['01'],
+        'AD' => ['02'],
     ];
 
     private const FORM_LABELS = [
@@ -247,7 +259,6 @@ class QueriesController extends Controller
             ->merge($this->checkBedbugContradiction($aeRaw, $visits))
             ->merge($this->checkUASatisfactionContradiction($uaRaw, $visits))
             ->merge($this->checkUAContinueContradiction($uaRaw, $visits))
-            ->merge($this->checkUALikeRecommendContradiction($uaRaw, $visits))
             ->merge($this->checkUASatisfiedButQuit($uaRaw, $visits))
             ->merge($this->checkUAFormIncomplete($uaRaw, $visits))
             ->merge($this->checkAEStopWithoutBedbugs($aeRaw, $visits))
@@ -512,7 +523,7 @@ class QueriesController extends Controller
 
     private function checkHouseholdIdFormat(array $idRaw, array $visiteRaw): array
     {
-        $pattern = '/^(DJ|GB|MI|DO|AG|AK)-(0[1-9])-(PD|G2)-(0[1-9]|1[0-9]|20)-(00[1-9]|0[1-9]\d|[1-9]\d{2})$/';
+        $pattern = '/^(DJ|GB|MI|DO|AG|AK|AD)-(0[1-9])-(PD|G2)-(0[1-9]|1[0-9]|20)-(00[1-9]|0[1-9]\d|[1-9]\d{2})$/';
 
         // Tablette et initiales par ménage (depuis form_1a_visite_menage)
         // a_numero_tablette = numéro brut (ex: 3) utilisé pour la comparaison avec l'identifiant
@@ -545,7 +556,7 @@ class QueriesController extends Controller
                 $results[] = $this->q('Q-ID-01', 'critical',
                     'Identifiant ménage — format incorrect',
                     "L'identifiant « {$id} » ne respecte pas le format attendu : VILLAGE-GRAPPE-BRAS-TABLETTE-MENAGE (ex : MI-03-PD-01-024). Chaque partie doit être séparée par un tiret, avec les chiffres zéro-complétés.",
-                    "Corriger l'identifiant dans REDCap pour qu'il corresponde au format : code village (DJ/GB/MI/DO/AG/AK), numéro de grappe (01–09), code bras (PD/G2), numéro tablette (01–20), numéro ménage (001–999).",
+                    "Corriger l'identifiant dans REDCap pour qu'il corresponde au format : code village (DJ/GB/MI/DO/AG/AK/AD), numéro de grappe (01–09), code bras (PD/G2), numéro tablette (01–20), numéro ménage (001–999).",
                     [
                         'event'        => 'baseline_et_distri_arm_1',
                         'form'         => 'form_1a_identification',
@@ -560,6 +571,27 @@ class QueriesController extends Controller
             }
 
             [, $idVillage, $idGrappe, $idBras, $idTablet, $idMenage] = $m;
+
+            // — Grappe autorisée pour ce village —
+            $allowedGrappes = self::VILLAGE_ALLOWED_GRAPPES[$idVillage] ?? [];
+            if (!in_array($idGrappe, $allowedGrappes)) {
+                $allowed = implode(', ', $allowedGrappes);
+                $results[] = $this->q('Q-ID-07', 'critical',
+                    'Identifiant ménage — numéro de grappe invalide pour ce village',
+                    "Pour le ménage {$id}, la grappe « {$idGrappe} » n'est pas autorisée pour le village {$idVillage}. Grappes valides pour {$idVillage} : {$allowed}.",
+                    "Corriger le numéro de grappe dans l'identifiant REDCap. Rappel : DO/AG/AK → grappe 01 uniquement ; AD → grappe 02 uniquement ; DJ → 01-02 ; GB → 01-03 ; MI → 01-04.",
+                    [
+                        'event'        => 'baseline_et_distri_arm_1',
+                        'form'         => 'form_1a_identification',
+                        'household_id' => $id,
+                        'tablet'       => $tabletIdByHh->get($id, ''),
+                        'initials'     => $initialsById->get($id, ''),
+                        'field'        => 'household_id',
+                        'value'        => "Grappe dans l'identifiant : {$idGrappe}  |  Autorisées : {$allowed}",
+                    ]
+                );
+                continue;
+            }
 
             // Village : accepte codes numériques (1/2/3) et alphanumériques (DJ/GB/MI)
             $rawVillage   = $hh['village'] ?? '';
@@ -1330,32 +1362,6 @@ class QueriesController extends Controller
         return $results;
     }
 
-    // ── User Acceptability — nouveaux checks ─────────────────────────────────
-
-    private function checkUALikeRecommendContradiction(array $uaRaw, Collection $visits): array
-    {
-        $results = [];
-        foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
-            if (($r['net_like'] ?? '') !== '0' || ($r['net_recommend'] ?? '') !== '1') continue;
-            $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
-            $results[] = $this->q('Q-UA-03', 'warning',
-                'Contradiction — n\'aime pas le filet mais le recommande',
-                "Pour le ménage {$id}, l'utilisateur déclare ne pas apprécier le filet (net_like = Non) mais recommanderait ce type de filet à d'autres personnes (net_recommend = Oui). Ces deux réponses sont logiquement incompatibles.",
-                "Recontacter l'agent pour clarifier. Probable erreur de saisie sur net_like ou net_recommend. Corriger la réponse erronée dans REDCap.",
-                [
-                    'event'        => 'user_acceptability_arm_1',
-                    'form'         => 'form_6_user_acceptability',
-                    'household_id' => $id,
-                    'tablet'       => $hh['a_tablette_id'] ?? '',
-                    'field'        => 'net_like / net_recommend',
-                    'value'        => 'net_like=0, net_recommend=1',
-                ]
-            );
-        }
-        return $results;
-    }
-
     private function checkUASatisfiedButQuit(array $uaRaw, Collection $visits): array
     {
         $results = [];
@@ -1384,6 +1390,8 @@ class QueriesController extends Controller
     {
         $results = [];
         foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
+            // Ménage absent (ac_hh_present = 0) → formulaire considéré rempli, pas de query
+            if (($r['ac_hh_present'] ?? '') === '0') continue;
             $isEmpty = ($r['net_like'] ?? '') === ''
                 && ($r['net_overall_satisfaction'] ?? '') === ''
                 && ($r['net_continue_use'] ?? '') === ''

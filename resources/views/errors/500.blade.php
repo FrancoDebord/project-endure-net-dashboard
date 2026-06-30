@@ -136,23 +136,47 @@
                         $exception instanceof \Illuminate\Database\QueryException ||
                         $exception instanceof \PDOException ||
                         (method_exists($exception, 'getMessage') && (
-                            str_contains($exception->getMessage(), 'SQLSTATE')         ||
-                            str_contains($exception->getMessage(), 'Connection refused')||
+                            str_contains($exception->getMessage(), 'SQLSTATE')          ||
+                            str_contains($exception->getMessage(), 'Connection refused') ||
                             str_contains($exception->getMessage(), 'could not find driver') ||
-                            str_contains($exception->getMessage(), 'Access denied for user')||
+                            str_contains($exception->getMessage(), 'Access denied for user') ||
                             str_contains($exception->getMessage(), 'No such host')
+                        ))
+                    );
+                    $isApiError = isset($exception) && (
+                        $exception instanceof \Illuminate\Http\Client\ConnectionException ||
+                        (method_exists($exception, 'getMessage') && (
+                            str_contains($exception->getMessage(), 'cURL error')  ||
+                            str_contains($exception->getMessage(), 'timed out')   ||
+                            str_contains($exception->getMessage(), 'redcap')
                         ))
                     );
                 @endphp
 
                 {{-- Animated icon --}}
+                @php
+                    $accentColor  = $isApiError ? 'sky' : 'orange';
+                    $iconColor    = $isApiError ? 'text-sky-500' : 'text-orange-500';
+                    $ringColor    = $isApiError ? 'bg-sky-100/50' : 'bg-orange-100/50';
+                    $bgFrom       = $isApiError ? 'from-sky-50'   : 'from-orange-50';
+                    $bgTo         = $isApiError ? 'to-sky-100'    : 'to-orange-100';
+                    $borderColor  = $isApiError ? 'border-sky-200': 'border-orange-200';
+                    $gradStripe   = $isApiError
+                        ? 'from-sky-400 via-sky-500 to-blue-500'
+                        : 'from-orange-400 via-orange-500 to-red-500';
+                @endphp
                 <div class="relative inline-flex items-center justify-center mb-4">
-                    <div class="absolute w-28 h-28 rounded-full bg-orange-100/50 pulse-ring"></div>
-                    <div class="relative w-20 h-20 bg-gradient-to-br from-orange-50 to-orange-100
+                    <div class="absolute w-28 h-28 rounded-full {{ $ringColor }} pulse-ring"></div>
+                    <div class="relative w-20 h-20 bg-gradient-to-br {{ $bgFrom }} {{ $bgTo }}
                                 rounded-full flex items-center justify-center
-                                border border-orange-200 shadow-inner">
-                        @if($isDbError)
-                        <svg class="w-10 h-10 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                {{ $borderColor }} border shadow-inner">
+                        @if($isApiError)
+                        <svg class="w-10 h-10 {{ $iconColor }}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                  d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
+                        </svg>
+                        @elseif($isDbError)
+                        <svg class="w-10 h-10 {{ $iconColor }}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <ellipse cx="12" cy="5" rx="9" ry="3" stroke-width="1.5"/>
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                                   d="M3 5v4c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
@@ -160,7 +184,7 @@
                                   d="M3 9v6c0 1.657 4.03 3 9 3s9-1.343 9-3V9"/>
                         </svg>
                         @else
-                        <svg class="w-10 h-10 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg class="w-10 h-10 {{ $iconColor }}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                                   d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2
                                      M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2
@@ -178,13 +202,23 @@
                     </div>
                 </div>
 
+                {{-- Update gradient stripe dynamically --}}
+                <script>
+                    document.querySelector('.h-1\\.5').className =
+                        'h-1.5 bg-gradient-to-r {{ $gradStripe }}';
+                </script>
+
                 {{-- Code number (huge muted) --}}
                 <p class="text-9xl font-black leading-none select-none pointer-events-none"
-                   style="color:rgba(249,115,22,.1);letter-spacing:-.04em;margin-bottom:-1.5rem;">500</p>
+                   style="color:rgba({{ $isApiError ? '14,165,233' : '249,115,22' }},.1);letter-spacing:-.04em;margin-bottom:-1.5rem;">
+                    {{ $isApiError ? '503' : '500' }}
+                </p>
 
                 {{-- Title --}}
                 <h2 class="relative text-2xl font-extrabold text-slate-800 mb-3">
-                    @if($isDbError)
+                    @if($isApiError)
+                        API REDCap inaccessible
+                    @elseif($isDbError)
                         Base de données inaccessible
                     @else
                         Erreur interne du serveur
@@ -193,7 +227,11 @@
 
                 {{-- Description --}}
                 <p class="text-slate-500 text-sm leading-relaxed mb-8 max-w-sm mx-auto">
-                    @if($isDbError)
+                    @if($isApiError)
+                        La connexion au serveur REDCap <strong class="text-slate-700">n'a pas pu être établie</strong>.
+                        Vérifiez que le serveur REDCap est en ligne et que le réseau est accessible,
+                        puis réessayez dans quelques instants.
+                    @elseif($isDbError)
                         La connexion au serveur MySQL <strong class="text-slate-700">n'a pas pu être établie</strong>.
                         Le service de base de données est peut-être en cours de redémarrage
                         ou les paramètres de connexion ont changé.
@@ -234,12 +272,20 @@
 
                 {{-- Status chips --}}
                 <div class="flex items-center justify-center gap-3 flex-wrap mb-6">
+                    @if($isApiError)
+                    <span class="inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full
+                                 bg-sky-50 text-sky-700 border border-sky-200">
+                        <span class="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+                        REDCap API · inaccessible
+                    </span>
+                    @else
                     <span id="chip-db"
                           class="inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full
-                                 bg-orange-50 text-orange-600 border border-orange-200">
-                        <span class="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
-                        MySQL · 127.0.0.1:3306
+                                 {{ $isDbError ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200' }} border">
+                        <span class="w-1.5 h-1.5 rounded-full {{ $isDbError ? 'bg-orange-400 animate-pulse' : 'bg-emerald-400' }}"></span>
+                        MySQL · {{ $isDbError ? 'inaccessible' : 'en ligne' }}
                     </span>
+                    @endif
                     <span id="chip-net"
                           class="inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full
                                  bg-emerald-50 text-emerald-600 border border-emerald-200">
