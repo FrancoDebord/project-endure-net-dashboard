@@ -8,6 +8,7 @@ use App\Http\Controllers\GpsExportController;
 use App\Http\Controllers\InspectionController;
 use App\Http\Controllers\QueriesController;
 use App\Http\Controllers\RapportBrasController;
+use App\Http\Controllers\SuiviCohorteController;
 use Illuminate\Support\Facades\Route;
 
 // Auth routes (guest only)
@@ -34,11 +35,19 @@ Route::middleware('auth')->group(function () {
     Route::post('/queries/refresh', [QueriesController::class, 'refresh'])->name('queries.refresh');
     Route::get('/queries/pdf', [QueriesController::class, 'exportPdf'])->name('queries.pdf');
     Route::get('/distribution/pdf', [DashboardController::class, 'exportDistributionPdf'])->name('distribution.pdf');
+    Route::get('/baseline/old-nets/csv', [DashboardController::class, 'exportOldNetsHouseholdsCsv'])->name('baseline.oldnets.csv');
+    Route::get('/dashboard/flow-diagram', [DashboardController::class, 'downloadFlowDiagram'])->name('dashboard.flow');
     Route::get('/distribution/resume/pdf', [DashboardController::class, 'exportDistributionResumePdf'])->name('distribution.resume.pdf');
     Route::get('/rapport/pdf', [DashboardController::class, 'exportRapportPdf'])->name('rapport.pdf');
     Route::post('/performance/pdf', [DashboardController::class, 'exportPerformancePdf'])->name('performance.pdf');
     Route::get('/gps-export',  [GpsExportController::class, 'index'])->name('gps.export');
     Route::post('/gps-export', [GpsExportController::class, 'export'])->name('gps.export.download');
+
+    // Suivi Cohortes A et B : suivi individuel des ménages + listes PDF par DAG
+    Route::get('/suivi-a/menages',     [SuiviCohorteController::class, 'index'])->defaults('cohort', 'a')->name('suivi-a.menages');
+    Route::get('/suivi-a/menages/pdf', [SuiviCohorteController::class, 'pdf'])->defaults('cohort', 'a')->name('suivi-a.menages.pdf');
+    Route::get('/suivi-b/menages',     [SuiviCohorteController::class, 'index'])->defaults('cohort', 'b')->name('suivi-b.menages');
+    Route::get('/suivi-b/menages/pdf', [SuiviCohorteController::class, 'pdf'])->defaults('cohort', 'b')->name('suivi-b.menages.pdf');
 
     // Rapport par bras
     Route::get('/rapport/bras',     [RapportBrasController::class, 'index'])->name('rapport.bras');

@@ -46,8 +46,8 @@
                     </div>
                     <div class="p-4 text-center">
                         <p class="text-xs text-gray-400 uppercase tracking-wide leading-tight mb-2">Visités</p>
-                        <p class="text-2xl font-extrabold" style="color:{{ $armColor }}">{{ 371 }}</p>
-                        <p class="text-xs text-gray-400">{{ $pctSel(371) }}%</p>
+                        <p class="text-2xl font-extrabold" style="color:{{ $armColor }}">{{ $armEnquetes }}</p>
+                        <p class="text-xs text-gray-400">{{ $pctSel($armEnquetes) }}%</p>
                     </div>
                     <div class="p-4 text-center">
                         <p class="text-xs text-gray-400 uppercase tracking-wide leading-tight mb-2">Présents</p>
@@ -318,19 +318,33 @@
                         <tr class="text-xs text-gray-400 uppercase border-b bg-gray-50">
                             <th class="py-2.5 px-4 text-left">Symptôme</th>
                             <th class="py-2.5 px-4 text-center" style="color:#C41230">PERMANET DUAL<br><span class="font-normal normal-case">n={{ $pdNet }} nets</span></th>
-                            <th class="py-2.5 px-4 text-center text-gray-400 text-xs normal-case font-normal">Groupes d'âge</th>
+                            <th class="py-2.5 px-4 text-center text-gray-400 text-xs normal-case font-normal">Groupes d'âge<br><span class="italic text-gray-300 text-[10px] font-normal normal-case" title="Un filet peut être utilisé par plusieurs tranches d'âge — la somme peut dépasser le total filets">∑ peut &gt; total</span></th>
                             <th class="py-2.5 px-4 text-center" style="color:#374151">INTERCEPTOR G2<br><span class="font-normal normal-case">n={{ $g2Net }} nets</span></th>
-                            <th class="py-2.5 px-4 text-center text-gray-400 text-xs normal-case font-normal">Groupes d'âge</th>
+                            <th class="py-2.5 px-4 text-center text-gray-400 text-xs normal-case font-normal">Groupes d'âge<br><span class="italic text-gray-300 text-[10px] font-normal normal-case" title="Un filet peut être utilisé par plusieurs tranches d'âge — la somme peut dépasser le total filets">∑ peut &gt; total</span></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-50">
                         @foreach ($pdSym as $field => $sData)
                         @php
-                            $g2Data = $g2Sym[$field] ?? ['count' => 0, 'pct' => 0, 'ageCounts' => []];
+                            $g2Data    = $g2Sym[$field] ?? ['count' => 0, 'pct' => 0, 'ageCounts' => [], 'householdIds' => []];
                             $ageAbbrev = ['Adulte' => 'A', 'Enfant (< 18 ans)' => 'E', 'Femme enceinte' => 'FE'];
+                            $symRowId  = 'aeSymRow-' . $loop->index;
+                            $pdHhIds   = $sData['householdIds'] ?? [];
+                            $g2HhIds   = $g2Data['householdIds'] ?? [];
+                            $hasHh     = count($pdHhIds) > 0 || count($g2HhIds) > 0;
                         @endphp
-                        <tr class="hov-row transition-colors">
-                            <td class="py-2.5 px-4 font-medium text-gray-700">{{ $sData['label'] }}</td>
+                        <tr class="hov-row transition-colors {{ $hasHh ? 'cursor-pointer' : '' }}"
+                            @if($hasHh) onclick="document.getElementById('{{ $symRowId }}').classList.toggle('hidden')" @endif>
+                            <td class="py-2.5 px-4 font-medium text-gray-700">
+                                <span class="inline-flex items-center gap-1.5">
+                                    @if($hasHh)
+                                    <svg class="w-3 h-3 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                    @endif
+                                    {{ $sData['label'] }}
+                                </span>
+                            </td>
                             <td class="py-2.5 px-4 text-center">
                                 <span class="font-bold" style="color:#C41230">{{ $sData['count'] }}</span>
                                 <span class="text-xs text-gray-400 ml-1">({{ $sData['pct'] }}%)</span>
@@ -358,6 +372,41 @@
                                 @endif
                             </td>
                         </tr>
+                        @if($hasHh)
+                        <tr id="{{ $symRowId }}" class="hidden">
+                            <td colspan="5" class="px-6 py-4 bg-gray-50 border-b border-gray-100">
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                    @if(count($pdHhIds) > 0)
+                                    <div>
+                                        <p class="text-xs font-semibold mb-2" style="color:#C41230">
+                                            PERMANET DUAL — {{ count($pdHhIds) }} ménage(s) concerné(s)
+                                        </p>
+                                        <div class="flex flex-wrap gap-1">
+                                            @foreach($pdHhIds as $hhid)
+                                            <span class="font-mono text-[10px] bg-red-50 text-red-700 border border-red-100 px-1.5 py-0.5 rounded">{{ $hhid }}</span>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                    @endif
+                                    @if(count($g2HhIds) > 0)
+                                    <div>
+                                        <p class="text-xs font-semibold text-gray-600 mb-2">
+                                            INTERCEPTOR G2 — {{ count($g2HhIds) }} ménage(s) concerné(s)
+                                        </p>
+                                        <div class="flex flex-wrap gap-1">
+                                            @foreach($g2HhIds as $hhid)
+                                            <span class="font-mono text-[10px] bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded">{{ $hhid }}</span>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                    @endif
+                                </div>
+                                <p class="mt-3 text-[10px] text-gray-400 italic">
+                                    Note : le total "filets" compte les enregistrements Form 5b avec ce symptôme. La somme des groupes d'âge peut le dépasser car un même filet peut être utilisé par plusieurs tranches d'âge simultanément.
+                                </p>
+                            </td>
+                        </tr>
+                        @endif
                         @endforeach
                     </tbody>
                 </table>

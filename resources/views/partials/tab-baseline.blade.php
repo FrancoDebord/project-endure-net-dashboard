@@ -225,6 +225,25 @@
             @endif
         </section>
 
+        {{-- Export Kobo : ménages possédant des moustiquaires avant la distribution --}}
+        <section class="card p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+                <p class="section-title mb-1">Ménages possédant des moustiquaires avant la distribution</p>
+                <p class="text-xs text-gray-500">
+                    Ménages consentis ayant déclaré d'anciennes moustiquaires : village, grappe, ID ménage, bras, cohorte,
+                    nombre d'anciennes moustiquaires. Fichier CSV prêt à importer dans KoboToolbox.
+                </p>
+            </div>
+            <a href="{{ route('baseline.oldnets.csv') }}"
+               class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white whitespace-nowrap shrink-0"
+               style="background:var(--red)">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/>
+                </svg>
+                Télécharger le CSV
+            </a>
+        </section>
+
         {{-- Tableau ménages dépliable + recherche --}}
         <section class="card overflow-hidden">
             <details open>
@@ -249,23 +268,23 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
                             </svg>
                             <input id="searchHH" type="text" placeholder="Rechercher un ménage (ID, village, bras, code filet...)"
-                                   oninput="filterHH()"
+                                   oninput="bsFilterHH()"
                                    class="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:border-transparent"
                                    style="--tw-ring-color:var(--red)">
                         </div>
-                        <select id="filterBras" onchange="filterHH()"
+                        <select id="filterBras" onchange="bsFilterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                             <option value="">Tous les bras</option>
                             <option>PERMANET DUAL</option>
                             <option>INTERCEPTOR G2</option>
                         </select>
-                        <select id="filterCohort" onchange="filterHH()"
+                        <select id="filterCohort" onchange="bsFilterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                             <option value="">Toutes les cohortes</option>
                             <option>Cohorte A</option>
                             <option>Cohorte B</option>
                         </select>
-                        <select id="filterHHVillage" onchange="filterHH()"
+                        <select id="filterHHVillage" onchange="bsFilterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                             <option value="">Tous les villages</option>
                             <option>Djigbe</option>
@@ -275,21 +294,21 @@
                             <option>Agao</option>
                             <option>Akoba</option>
                         </select>
-                        <select id="filterHHGrappe" onchange="filterHH()"
+                        <select id="filterHHGrappe" onchange="bsFilterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                             <option value="">Toutes les grappes</option>
                             <option>Grappe 1</option>
                             <option>Grappe 2</option>
                             <option>Grappe 3</option>
                         </select>
-                        <select id="filterHHDag" onchange="filterHH()"
+                        <select id="filterHHDag" onchange="bsFilterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                             <option value="">Tous les DAGs</option>
                             @foreach ($householdDetails->pluck('dag')->filter()->unique()->sort() as $dagOpt)
                                 <option value="{{ $dagOpt }}">{{ $dagOpt }}</option>
                             @endforeach
                         </select>
-                        <select id="filterConsent" onchange="filterHH()"
+                        <select id="filterConsent" onchange="bsFilterHH()"
                                 class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                             <option value="">Tous les ménages</option>
                             <option value="1">Consentis</option>
@@ -301,7 +320,7 @@
                     </div>
 
                     <div class="overflow-x-auto">
-                        <table class="w-full text-sm" id="hhTable">
+                        <table class="w-full text-sm" id="hhTableJs">
                             <thead>
                                 <tr class="text-xs text-gray-400 uppercase border-b" style="background:#FDF4F5">
                                     <th class="py-2.5 px-3 text-left">ID Ménage</th>
@@ -320,55 +339,7 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-50">
-                                @forelse ($householdDetails as $hh)
-                                    <tr class="hov-row transition-colors" data-bras="{{ $hh['bras'] }}" data-village="{{ $hh['village'] }}" data-cohort="{{ $hh['cohort'] }}" data-cluster="{{ $hh['cluster'] }}" data-dag="{{ $hh['dag'] }}" data-consented="{{ $hh['consented'] ? '1' : '0' }}">
-                                        <td class="py-2.5 px-3 font-mono text-xs">
-                                            <span class="{{ $hh['id_valid'] ? 'text-gray-500' : 'text-red-500' }}">{{ $hh['id'] }}</span>
-                                            @if (!$hh['id_valid'])
-                                                <span class="ml-1 text-red-400" title="Identifiant invalide — format attendu : VILLAGE-GRAPPE-BRAS-TABLETTE-MENAGE">⚠</span>
-                                            @endif
-                                        </td>
-                                        <td class="py-2.5 px-3 font-medium text-gray-700">{{ $hh['village'] }}</td>
-                                        <td class="py-2.5 px-3">
-                                            @if ($hh['bras']==='PERMANET DUAL')
-                                                <span class="text-xs px-2 py-0.5 rounded-full font-semibold badge-red whitespace-nowrap">PERMANET DUAL</span>
-                                            @elseif ($hh['bras']==='INTERCEPTOR G2')
-                                                <span class="text-xs px-2 py-0.5 rounded-full font-semibold badge-gray whitespace-nowrap">INTERCEPTOR G2</span>
-                                            @else
-                                                <span class="text-gray-400 text-xs">—</span>
-                                            @endif
-                                        </td>
-                                        <td class="py-2.5 px-3">
-                                            <span class="text-xs px-2 py-0.5 rounded-full font-medium
-                                                {{ $hh['cohort']==='Cohorte A'?'badge-amb':'badge-slt' }}">
-                                                {{ $hh['cohort'] }}
-                                            </span>
-                                        </td>
-                                        <td class="py-2.5 px-3 text-xs text-gray-500">{{ $hh['cluster'] }}</td>
-                                        <td class="py-2.5 px-3 text-center">
-                                            @if ($hh['consented'])
-                                                <span class="inline-flex items-center gap-1 text-xs badge-ok px-2 py-0.5 rounded-full font-semibold">
-                                                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>Oui
-                                                </span>
-                                            @else
-                                                <span class="inline-flex items-center gap-1 text-xs badge-no px-2 py-0.5 rounded-full font-semibold">
-                                                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>Non
-                                                </span>
-                                            @endif
-                                        </td>
-                                        <td class="py-2.5 px-3 text-right font-bold text-gray-700">{{ $hh['members']?:'—' }}</td>
-                                        <td class="py-2.5 px-3 text-right text-gray-600">{{ $hh['sleep_spaces'] }}</td>
-                                        <td class="py-2.5 px-3 text-right text-gray-600">{{ $hh['old_nets']?:'—' }}</td>
-                                        <td class="py-2.5 px-3 text-right font-black" style="color:var(--red)">{{ $hh['study_nets']?:'—' }}</td>
-                                        <td class="py-2.5 px-3 font-mono text-xs text-gray-500">{{ $hh['net_codes']?:'—' }}</td>
-                                        <td class="py-2.5 px-3 text-right text-xs text-gray-500">{{ $hh['date_visit']?:'—' }}</td>
-                                        <td class="py-2.5 px-3 text-right text-xs text-gray-500">
-                                            {{ $hh['tablette'] ? "T{$hh['tablette']}" : '—' }}
-                                        </td>
-                                    </tr>
-                                @empty
-                                    <tr><td colspan="13" class="py-10 text-center text-gray-400 italic">Aucune donnée</td></tr>
-                                @endforelse
+                                {{-- Lignes générées côté navigateur (bsTables) depuis #hhData --}}
                             </tbody>
                         </table>
                     </div>
@@ -438,16 +409,16 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
                                 </svg>
                                 <input id="searchNets" type="text" placeholder="Rechercher un code, ménage..."
-                                       oninput="filterNets()"
+                                       oninput="bsFilterNets()"
                                        class="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none">
                             </div>
-                            <select id="filterNetsBras" onchange="filterNets()"
+                            <select id="filterNetsBras" onchange="bsFilterNets()"
                                     class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                                 <option value="">Tous les bras</option>
                                 <option>PERMANET DUAL</option>
                                 <option>INTERCEPTOR G2</option>
                             </select>
-                            <select id="filterNetsVillage" onchange="filterNets()"
+                            <select id="filterNetsVillage" onchange="bsFilterNets()"
                                     class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                                 <option value="">Tous les villages</option>
                                 <option>Djigbe</option>
@@ -457,20 +428,20 @@
                                 <option>Agao</option>
                                 <option>Akoba</option>
                             </select>
-                            <select id="filterNetsGrappe" onchange="filterNets()"
+                            <select id="filterNetsGrappe" onchange="bsFilterNets()"
                                     class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                                 <option value="">Toutes les grappes</option>
                                 <option>Grappe 1</option>
                                 <option>Grappe 2</option>
                                 <option>Grappe 3</option>
                             </select>
-                            <select id="filterNetsCohort" onchange="filterNets()"
+                            <select id="filterNetsCohort" onchange="bsFilterNets()"
                                     class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                                 <option value="">Toutes les cohortes</option>
                                 <option>Cohorte A</option>
                                 <option>Cohorte B</option>
                             </select>
-                            <select id="filterNetsDag" onchange="filterNets()"
+                            <select id="filterNetsDag" onchange="bsFilterNets()"
                                     class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
                                 <option value="">Tous les DAGs</option>
                                 @foreach ($byDag as $row)
@@ -482,7 +453,7 @@
                             </span>
                         </div>
                         <div class="overflow-x-auto">
-                            <table class="w-full text-sm" id="netsTable">
+                            <table class="w-full text-sm" id="netsTableJs">
                                 <thead>
                                     <tr class="text-xs text-gray-400 uppercase border-b" style="background:#FDF4F5">
                                         <th class="py-2.5 px-3 text-right">#</th>
@@ -496,35 +467,7 @@
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-50">
-                                    @forelse ($studyNetsDetail as $i => $net)
-                                        <tr class="hov-row transition-colors" data-bras="{{ $net['bras'] }}" data-village="{{ $net['village'] }}" data-cohort="{{ $net['cohort'] }}" data-cluster="{{ $net['cluster'] }}" data-dag="{{ $net['dag'] }}">
-                                            <td class="py-2.5 px-3 text-right text-xs text-gray-400">{{ $i+1 }}</td>
-                                            <td class="py-2.5 px-3 font-mono font-bold" style="color:var(--red)">
-                                                {{ $net['net_code'] }}
-                                            </td>
-                                            <td class="py-2.5 px-3 font-mono text-xs text-gray-500">{{ $net['household_id'] }}</td>
-                                            <td class="py-2.5 px-3">
-                                                @if ($net['bras']==='PERMANET DUAL')
-                                                    <span class="text-xs badge-red px-2 py-0.5 rounded-full font-semibold">PERMANET DUAL</span>
-                                                @elseif ($net['bras']==='INTERCEPTOR G2')
-                                                    <span class="text-xs badge-gray px-2 py-0.5 rounded-full font-semibold">INTERCEPTOR G2</span>
-                                                @else
-                                                    <span class="text-gray-400 text-xs">{{ $net['bras'] }}</span>
-                                                @endif
-                                            </td>
-                                            <td class="py-2.5 px-3">
-                                                <span class="text-xs px-2 py-0.5 rounded-full font-medium
-                                                    {{ $net['cohort']==='Cohorte A'?'badge-amb':'badge-slt' }}">
-                                                    {{ $net['cohort'] }}
-                                                </span>
-                                            </td>
-                                            <td class="py-2.5 px-3 text-gray-600">{{ $net['village'] }}</td>
-                                            <td class="py-2.5 px-3 text-xs text-gray-500">{{ $net['cluster'] }}</td>
-                                            <td class="py-2.5 px-3 text-xs text-gray-500">{{ $net['dag'] ?: '—' }}</td>
-                                        </tr>
-                                    @empty
-                                        <tr><td colspan="8" class="py-8 text-center text-gray-400 italic">Aucune moustiquaire enregistrée</td></tr>
-                                    @endforelse
+                                    {{-- Lignes générées côté navigateur (bsTables) depuis #netsData --}}
                                 </tbody>
                             </table>
                         </div>
@@ -713,6 +656,122 @@
             new FsControl().addTo(map);
             if (pts.length > 1) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])).pad(0.15), { maxZoom: 15 });
         })();
+    })();
+    </script>
+
+    {{-- ── Tableaux ménages / moustiquaires : données compactes + rendu paginé côté navigateur ──
+         (évite ~16 Mo de HTML : 2 700 ménages et 4 500 moustiquaires) --}}
+    <script type="application/json" id="hhData">{!! json_encode($householdDetails->map(fn($h) => [
+        $h['id'], $h['id_valid'] ? 1 : 0, $h['village'], $h['bras'], $h['cohort'], $h['cluster'],
+        $h['consented'] ? 1 : 0, $h['members'], $h['sleep_spaces'], $h['old_nets'], $h['study_nets'],
+        $h['net_codes'], $h['date_visit'], $h['tablette'], $h['dag'],
+    ])->values(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) !!}</script>
+    <script type="application/json" id="netsData">{!! json_encode($studyNetsDetail->map(fn($n) => [
+        $n['net_code'], $n['household_id'], $n['bras'], $n['cohort'], $n['village'], $n['cluster'], $n['dag'],
+    ])->values(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) !!}</script>
+    <script>
+    (function () {
+        const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const dash = v => (v === null || v === '' || v === 0 || v === '0') ? '—' : esc(v);
+        const brasBadge = b => b === 'PERMANET DUAL'
+            ? '<span class="text-xs px-2 py-0.5 rounded-full font-semibold badge-red whitespace-nowrap">PERMANET DUAL</span>'
+            : b === 'INTERCEPTOR G2'
+                ? '<span class="text-xs px-2 py-0.5 rounded-full font-semibold badge-gray whitespace-nowrap">INTERCEPTOR G2</span>'
+                : '<span class="text-gray-400 text-xs">' + (b ? esc(b) : '—') + '</span>';
+        const cohBadge = c => '<span class="text-xs px-2 py-0.5 rounded-full font-medium ' + (c === 'Cohorte A' ? 'badge-amb' : 'badge-slt') + '">' + esc(c) + '</span>';
+        const val = id => (document.getElementById(id) || {}).value || '';
+
+        // Tableau paginé générique : { tableId, data, match(row,q,f), row(r,i), countId, unit, filters:{} }
+        function makeTable(cfg) {
+            const table = document.getElementById(cfg.tableId);
+            if (!table) return null;
+            const tbody = table.querySelector('tbody');
+            const st = { page: 1, size: 50, rows: cfg.data };
+            const ctrl = document.createElement('div');
+            ctrl.className = 'flex items-center justify-between mt-2 px-1 text-xs text-gray-500 flex-wrap gap-2';
+            ctrl.innerHTML =
+                '<label class="flex items-center gap-1.5"><span class="text-gray-400">Lignes&nbsp;:</span>' +
+                '<select class="border border-gray-200 rounded px-1.5 py-0.5 text-xs">' +
+                '<option>25</option><option selected>50</option><option>100</option><option>250</option></select></label>' +
+                '<span class="flex items-center gap-1.5"><span class="pginfo tabular-nums text-gray-400"></span>' +
+                '<button class="pgprev px-2 py-0.5 border border-gray-200 rounded hover:bg-gray-50">‹</button>' +
+                '<button class="pgnext px-2 py-0.5 border border-gray-200 rounded hover:bg-gray-50">›</button></span>';
+            (table.closest('.overflow-x-auto') || table).insertAdjacentElement('afterend', ctrl);
+            const render = () => {
+                const total = st.rows.length, max = Math.max(1, Math.ceil(total / st.size));
+                st.page = Math.min(st.page, max);
+                const start = (st.page - 1) * st.size;
+                const slice = st.rows.slice(start, start + st.size);
+                tbody.innerHTML = slice.length
+                    ? slice.map((r, i) => cfg.row(r, start + i)).join('')
+                    : '<tr><td colspan="13" class="py-10 text-center text-gray-400 italic">Aucune donnée</td></tr>';
+                ctrl.querySelector('.pginfo').textContent = total ? (start + 1) + '–' + Math.min(start + st.size, total) + ' / ' + total : '0 / 0';
+                ctrl.querySelector('.pgprev').disabled = st.page <= 1;
+                ctrl.querySelector('.pgnext').disabled = st.page >= max;
+                const c = document.getElementById(cfg.countId);
+                if (c) c.textContent = total + ' ' + cfg.unit;
+            };
+            ctrl.querySelector('select').onchange = e => { st.size = +e.target.value; st.page = 1; render(); };
+            ctrl.querySelector('.pgprev').onclick = () => { st.page--; render(); };
+            ctrl.querySelector('.pgnext').onclick = () => { st.page++; render(); };
+            render();
+            return { filter: pred => { st.rows = cfg.data.filter(pred); st.page = 1; render(); } };
+        }
+
+        const parse = id => { try { return JSON.parse(document.getElementById(id).textContent); } catch (e) { return []; } };
+
+        // ── Ménages : [id, valid, village, bras, cohort, cluster, consented, members, sleep, oldNets, studyNets, codes, date, tablette, dag]
+        const hh = parse('hhData');
+        hh.forEach(r => r._s = r.join(' ').toLowerCase());
+        const hhTable = makeTable({
+            tableId: 'hhTableJs', data: hh, countId: 'hhCount', unit: 'lignes',
+            row: r => '<tr class="hov-row">' +
+                '<td class="py-2.5 px-3 font-mono text-xs"><span class="' + (r[1] ? 'text-gray-500' : 'text-red-500') + '">' + esc(r[0]) + '</span>' +
+                    (r[1] ? '' : '<span class="ml-1 text-red-400" title="Identifiant invalide — format attendu : VILLAGE-GRAPPE-BRAS-TABLETTE-MENAGE">⚠</span>') + '</td>' +
+                '<td class="py-2.5 px-3 font-medium text-gray-700">' + esc(r[2]) + '</td>' +
+                '<td class="py-2.5 px-3">' + brasBadge(r[3]) + '</td>' +
+                '<td class="py-2.5 px-3">' + cohBadge(r[4]) + '</td>' +
+                '<td class="py-2.5 px-3 text-xs text-gray-500">' + esc(r[5]) + '</td>' +
+                '<td class="py-2.5 px-3 text-center">' + (r[6]
+                    ? '<span class="inline-flex items-center gap-1 text-xs badge-ok px-2 py-0.5 rounded-full font-semibold"><span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>Oui</span>'
+                    : '<span class="inline-flex items-center gap-1 text-xs badge-no px-2 py-0.5 rounded-full font-semibold"><span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>Non</span>') + '</td>' +
+                '<td class="py-2.5 px-3 text-right font-bold text-gray-700">' + dash(r[7]) + '</td>' +
+                '<td class="py-2.5 px-3 text-right text-gray-600">' + esc(r[8]) + '</td>' +
+                '<td class="py-2.5 px-3 text-right text-gray-600">' + dash(r[9]) + '</td>' +
+                '<td class="py-2.5 px-3 text-right font-black" style="color:var(--red)">' + dash(r[10]) + '</td>' +
+                '<td class="py-2.5 px-3 font-mono text-xs text-gray-500">' + dash(r[11]) + '</td>' +
+                '<td class="py-2.5 px-3 text-right text-xs text-gray-500">' + dash(r[12]) + '</td>' +
+                '<td class="py-2.5 px-3 text-right text-xs text-gray-500">' + (r[13] ? 'T' + esc(r[13]) : '—') + '</td></tr>',
+        });
+        window.bsFilterHH = function () {
+            const q = val('searchHH').toLowerCase(), bras = val('filterBras'), coh = val('filterCohort'),
+                  village = val('filterHHVillage'), grappe = val('filterHHGrappe'), dag = val('filterHHDag'), consent = val('filterConsent');
+            hhTable && hhTable.filter(r => (!q || r._s.includes(q)) && (!bras || r[3] === bras) && (!coh || r[4] === coh)
+                && (!village || r[2] === village) && (!grappe || String(r[5]).includes(grappe)) && (!dag || r[14] === dag)
+                && (!consent || String(r[6]) === consent));
+        };
+
+        // ── Moustiquaires : [code, household_id, bras, cohort, village, cluster, dag]
+        const nets = parse('netsData');
+        nets.forEach(r => r._s = r.join(' ').toLowerCase());
+        const netsTable = makeTable({
+            tableId: 'netsTableJs', data: nets, countId: 'netsCount', unit: 'filets',
+            row: (r, i) => '<tr class="hov-row">' +
+                '<td class="py-2.5 px-3 text-right text-xs text-gray-400">' + (i + 1) + '</td>' +
+                '<td class="py-2.5 px-3 font-mono font-bold" style="color:var(--red)">' + esc(r[0]) + '</td>' +
+                '<td class="py-2.5 px-3 font-mono text-xs text-gray-500">' + esc(r[1]) + '</td>' +
+                '<td class="py-2.5 px-3">' + brasBadge(r[2]) + '</td>' +
+                '<td class="py-2.5 px-3">' + cohBadge(r[3]) + '</td>' +
+                '<td class="py-2.5 px-3 text-gray-600">' + esc(r[4]) + '</td>' +
+                '<td class="py-2.5 px-3 text-xs text-gray-500">' + esc(r[5]) + '</td>' +
+                '<td class="py-2.5 px-3 text-xs text-gray-500">' + (r[6] ? esc(r[6]) : '—') + '</td></tr>',
+        });
+        window.bsFilterNets = function () {
+            const q = val('searchNets').toLowerCase(), bras = val('filterNetsBras'), village = val('filterNetsVillage'),
+                  grappe = val('filterNetsGrappe'), cohort = val('filterNetsCohort'), dag = val('filterNetsDag');
+            netsTable && netsTable.filter(r => (!q || r._s.includes(q)) && (!bras || r[2] === bras) && (!village || r[4] === village)
+                && (!grappe || String(r[5]).includes(grappe)) && (!cohort || r[3] === cohort) && (!dag || r[6] === dag));
+        };
     })();
     </script>
 

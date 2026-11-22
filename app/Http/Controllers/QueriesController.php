@@ -10,6 +10,15 @@ use Illuminate\View\View;
 
 class QueriesController extends Controller
 {
+
+    /** Recherche O(1) d'un ménage dans $visits (index construit une fois par collection) */
+    private array $visitIndex = [];
+    private function visitOf(\Illuminate\Support\Collection $visits, string $id): ?array
+    {
+        $k = spl_object_id($visits);
+        $this->visitIndex[$k] ??= $visits->keyBy('household_id')->all();
+        return $this->visitIndex[$k][$id] ?? null;
+    }
     private const EVENT_LABELS = [
         'baseline_et_distri_arm_1'  => 'Baseline & Distribution',
         'user_acceptability_arm_1'  => 'User Acceptability',
@@ -225,11 +234,11 @@ class QueriesController extends Controller
         $uaRaw       = $this->redcap->getUserAcceptabilityData('user_acceptability_arm_1');
 
         $followUpRaw = [];
-        foreach ([
-            'suivi_6_mois_arm_1', 'suivi_12_mois_arm_1', 'suivi_18_mois_coho_arm_1',
-            'suivi_24_mois_arm_1', 'suivi_36_mois_arm_1',
-        ] as $event) {
-            $followUpRaw[$event] = $this->redcap->getFollowUpData($event);
+        foreach (\App\Services\RedCapService::COHORT_B_EVENTS as $event) {
+            $rawA = in_array($event, \App\Services\RedCapService::COHORT_A_EVENTS, true)
+                ? $this->redcap->getCohortAFollowUpData($event)
+                : [];
+            $followUpRaw[$event] = array_merge($rawA, $this->redcap->getCohortBFollowUpData($event));
         }
 
         $visits = $this->buildVisits($visiteRaw, $idRaw, $qbRaw);
@@ -1158,7 +1167,7 @@ class QueriesController extends Controller
         $results = [];
         foreach ($nets as $net) {
             $id = $net['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-NET-01', 'critical',
                 'Code moustiquaire manquant',
                 "La moustiquaire (instance #{$net['redcap_repeat_instance']}) distribuée au ménage {$id} n'a pas de code d'identification (net_identifier_man vide). Sans ce code, le traçage et le suivi du filet sont impossibles.",
@@ -1226,7 +1235,7 @@ class QueriesController extends Controller
             $hasDetail = collect(self::AE_FIELDS)->contains(fn($f) => ($r[$f] ?? '') === '1');
             if (!$hasDetail) {
                 $id = $r['household_id'];
-                $hh = $visits->firstWhere('household_id', $id);
+                $hh = $this->visitOf($visits, $id);
                 $results[] = $this->q('Q-AE-01', 'critical',
                     'Symptôme déclaré sans type précisé',
                     "Pour le ménage {$id}, la présence d'un symptôme est cochée (ae_any_symptom = Oui) mais aucun type de symptôme spécifique n'est sélectionné parmi la liste. Violation de skip logic.",
@@ -1260,7 +1269,7 @@ class QueriesController extends Controller
             $hasDetail = collect(self::AE_FIELDS)->contains(fn($f) => ($r[$f] ?? '') === '1');
             if ($hasDetail) {
                 $id = $r['household_id'];
-                $hh = $visits->firstWhere('household_id', $id);
+                $hh = $this->visitOf($visits, $id);
                 $results[] = $this->q('Q-AE-02', 'warning',
                     'Type de symptôme coché sans déclaration globale',
                     "Pour le ménage {$id}, un ou plusieurs types de symptômes spécifiques sont cochés mais la question générale ae_any_symptom n'est pas à Oui. Incohérence de skip logic.",
@@ -1293,7 +1302,7 @@ class QueriesController extends Controller
         foreach ($form5a as $r) {
             if ($r['bedbugs_current_house'] !== '0' || ($r['bb_seen_on_net_ever'] ?? '') !== '1') continue;
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-AE-03', 'warning',
                 'Contradiction — punaises de lit',
                 "Pour le ménage {$id}, aucune punaise n'est signalée dans la maison actuellement (bedbugs_current_house = Non) alors que des punaises auraient déjà été observées sur le filet (bb_seen_on_net_ever = Oui). Si des punaises sont sur le filet, elles proviennent de la maison.",
@@ -1320,7 +1329,7 @@ class QueriesController extends Controller
         foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
             if ($r['net_like'] !== '1' || $r['net_overall_satisfaction'] !== '4') continue;
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-UA-01', 'warning',
                 'Contradiction appréciation / satisfaction',
                 "Pour le ménage {$id}, l'utilisateur déclare apprécier le filet (net_like = Oui) mais sa satisfaction globale est « Très insatisfait » (net_overall_satisfaction = 4). Ces deux réponses sont logiquement incompatibles.",
@@ -1344,7 +1353,7 @@ class QueriesController extends Controller
         foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
             if ($r['net_like'] !== '1' || $r['net_recommend'] !== '1' || $r['net_continue_use'] !== '0') continue;
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-UA-02', 'warning',
                 'Contradiction — aime et recommande mais ne veut pas continuer',
                 "Pour le ménage {$id}, l'utilisateur aime le filet ET le recommande à d'autres (net_like=Oui, net_recommend=Oui) mais déclare ne pas vouloir continuer à l'utiliser (net_continue_use=Non). Incohérence logique.",
@@ -1368,7 +1377,7 @@ class QueriesController extends Controller
         foreach (collect($uaRaw)->filter(fn($r) => $r['household_id'] !== '') as $r) {
             if (($r['net_overall_satisfaction'] ?? '') !== '1' || ($r['net_continue_use'] ?? '') !== '0') continue;
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-UA-04', 'warning',
                 'Contradiction — très satisfait mais ne veut pas continuer',
                 "Pour le ménage {$id}, l'utilisateur est très satisfait du filet (net_overall_satisfaction = 1 — Très satisfait) mais ne souhaite pas continuer à l'utiliser (net_continue_use = Non). Ces deux réponses sont logiquement incompatibles.",
@@ -1398,7 +1407,7 @@ class QueriesController extends Controller
                 && ($r['net_recommend'] ?? '') === '';
             if (!$isEmpty) continue;
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-UA-05', 'critical',
                 'Formulaire Acceptabilité vide — champs essentiels manquants',
                 "Pour le ménage {$id}, un enregistrement existe dans le formulaire Acceptabilité utilisateur (Form 6) mais tous les champs essentiels sont vides (net_like, net_overall_satisfaction, net_continue_use, net_recommend). Le formulaire a probablement été ouvert sans être complété.",
@@ -1430,7 +1439,7 @@ class QueriesController extends Controller
         foreach ($form5a as $r) {
             if (($r['bb_stop_net_use_ever'] ?? '') !== '1' || ($r['bb_seen_on_net_ever'] ?? '') !== '0') continue;
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-AE-04', 'warning',
                 'Arrêt d\'utilisation du filet sans observation de punaises',
                 "Pour le ménage {$id}, l'utilisateur déclare avoir arrêté d'utiliser le filet à cause des punaises (bb_stop_net_use_ever = Oui) mais n'avoir jamais observé de punaises sur le filet (bb_seen_on_net_ever = Non). Contradiction logique.",
@@ -1462,7 +1471,7 @@ class QueriesController extends Controller
         $results = [];
         foreach ($selectedIds as $id) {
             if ($aeHouseholdIds->has($id)) continue;
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-AE-05', 'warning',
                 'Ménage AE sélectionné sans formulaire REDCap',
                 "Le ménage {$id} a été retenu dans la sélection aléatoire Adverse Events mais aucun enregistrement n'existe dans le formulaire Adverse Events de REDCap (event adverse_events_arm_1). La visite AE n'a probablement pas encore été effectuée ou saisie.",
@@ -1493,7 +1502,7 @@ class QueriesController extends Controller
         $results = [];
         foreach ($form5a as $r) {
             $id = $r['household_id'];
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-AE-06', 'warning',
                 'Date de visite Adverse Events manquante',
                 "Pour le ménage {$id}, un enregistrement existe dans le formulaire Adverse Events (Form 5A) mais la date de visite (ad_evt_date) n'est pas renseignée. Ce champ est obligatoire pour tracer la chronologie des événements indésirables.",
@@ -1533,7 +1542,7 @@ class QueriesController extends Controller
             if ($hasSymptomByHh->get($id, false)) continue; // symptôme présent → justifié
             if (isset($seen[$id])) continue;
             $seen[$id] = true;
-            $hh = $visits->firstWhere('household_id', $id);
+            $hh = $this->visitOf($visits, $id);
             $results[] = $this->q('Q-AE-07', 'info',
                 'Arrêt d\'utilisation du filet sans symptôme déclaré',
                 "Pour le ménage {$id}, l'utilisateur déclare ne pas vouloir continuer à utiliser le filet (itn_continue_use = Non) mais aucun symptôme lié au filet n'est rapporté dans le formulaire Adverse Events (ae_any_symptom = Non ou vide pour toutes les instances). L'absence de justification mérite vérification.",
@@ -1564,7 +1573,7 @@ class QueriesController extends Controller
 
         foreach ($records as $r) {
             $id   = $r['household_id'];
-            $hh   = $visits->firstWhere('household_id', $id);
+            $hh   = $this->visitOf($visits, $id);
             $isF7 = $r['redcap_repeat_instrument'] === 'form_7_suivi_des_moustiquaires_de_ltude';
             $form = $isF7 ? 'form_7_suivi_des_moustiquaires_de_ltude' : 'form_10_suivi_cohorte_b';
             $inst = $r['redcap_repeat_instance'];
@@ -1573,7 +1582,7 @@ class QueriesController extends Controller
                 $present   = $r['net_present']        ?? '';
                 $usedNight = $r['net_used_last_night'] ?? '';
                 $hasHoles  = $r['itn_has_holes']       ?? '';
-                $netId     = $r['fw_study_net_id_scan'] ?: ($r['fw_study_net_id_saisie'] ?? '—');
+                $netId     = ($r['fu_itn_id_saisie'] ?? '') ?: ('N°' . ($r['fu_num_hh_itn'] ?? '—'));
                 $date      = $r['afw_date']      ?? '—';
                 $initials  = $r['a_fw_initials'] ?? '';
 

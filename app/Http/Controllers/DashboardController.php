@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\CohortAFollowUpService;
 use App\Services\RedCapService;
+use App\Support\HouseholdHelpers;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -11,111 +13,35 @@ use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
-    private const CLUSTER_LABELS = [
-        '1'  => 'Djigbe / Grappe 1',    '2'  => 'Djigbe / Grappe 2',
-        '3'  => 'Gbonou / Grappe 1',    '4'  => 'Gbonou / Grappe 2',    '5'  => 'Gbonou / Grappe 3',
-        '6'  => 'Miniffi / Grappe 1',   '7'  => 'Miniffi / Grappe 2',   '8'  => 'Miniffi / Grappe 3',
-        '9'  => 'Miniffi / Grappe 4',
-        '10' => 'Dogbo / Grappe 1',     '11' => 'Agao / Grappe 1',      '12' => 'Akoba / Grappe 1',
-        '13' => 'Agbondjedo / Grappe 2',
-    ];
-    // Mapping (village, grappe) → cluster key, derived from household ID format
-    private const CLUSTER_FROM_ID = [
-        'DJ' => ['01' => '1', '02' => '2'],
-        'GB' => ['01' => '3', '02' => '4', '03' => '5'],
-        'MI' => ['01' => '6', '02' => '7', '03' => '8'],
-    ];
-    // Accepte les codes numériques (1/2/3) et alphanumériques (DJ/GB/MI) selon export REDCap
-    private const VILLAGE_LABELS = [
-        'DJ' => 'Djigbe', '1' => 'Djigbe',
-        'GB' => 'Gbonou', '2' => 'Gbonou',
-        'MI' => 'Miniffi', '3' => 'Miniffi',
-        'DO' => 'Dogbo',
-        'AG' => 'Agao',
-        'AK' => 'Akoba',
-        'AD' => 'Agbondjedo',
-    ];
-    private const BRAS_LABELS = ['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'];
-    // Cluster global (1-8) → bras : PD si cluster ∈ {1,5,7,8}, G2 si ∈ {2,3,4,6}
-    private const BRAS_FROM_CLUSTER = [
-        '1' => '1', // Djigbe G1   → PERMANET DUAL
-        '2' => '2', // Djigbe G2   → INTERCEPTOR G2
-        '3' => '2', // Gbonou G1   → INTERCEPTOR G2
-        '4' => '2', // Gbonou G2   → INTERCEPTOR G2
-        '5' => '1', // Gbonou G3   → PERMANET DUAL
-        '6' => '2', // Miniffi G1  → INTERCEPTOR G2
-        '7' => '1', // Miniffi G2  → PERMANET DUAL
-        '8' => '1', // Miniffi G3  → PERMANET DUAL
-    ];
-    private const COHORT_LABELS  = ['1' => 'Cohorte A', '2' => 'Cohorte B'];
+    use HouseholdHelpers;
+
+    /** Recherche O(1) d'un ménage dans $visits (index construit une fois par collection) */
+    private array $visitIndex = [];
+    private function visitOf(\Illuminate\Support\Collection $visits, string $id): ?array
+    {
+        $k = spl_object_id($visits);
+        $this->visitIndex[$k] ??= $visits->keyBy('household_id')->all();
+        return $this->visitIndex[$k][$id] ?? null;
+    }
+
     private const TABLET_COLORS  = [
         '#C41230','#374151','#D97706','#16A34A',
         '#7C3AED','#0891B2','#DB2777','#059669',
         '#EA580C','#4338CA','#0D9488','#9333EA',
     ];
 
-    /**
-     * Parses a household ID with format VILLAGE-GRAPPE-BRAS-TABLETTE-MENAGE.
-     * Returns ['valid', 'village', 'grappe', 'bras', 'tablette', 'menage'].
-     */
-    private static function parseHouseholdId(string $id): array
-    {
-        $empty = ['valid' => false, 'village' => '', 'grappe' => '', 'bras' => '', 'tablette' => '', 'menage' => ''];
-        $parts = explode('-', $id);
-        if (count($parts) !== 5) return $empty;
 
-        [$village, $grappe, $bras, $tablette, $menage] = $parts;
-        $village = strtoupper($village);
-        $bras    = strtoupper($bras);
+    /** Données nécessaires à tous les onglets (buildVisits) — clés de RedCapService::warm() */
+    private const CORE_DATA = ['project_info', 'visite', 'identification', 'questionnaire_base'];
 
-        $allowedGrappes = [
-            'DJ' => ['01', '02'],
-            'GB' => ['01', '02', '03'],
-            'MI' => ['01', '02', '03', '04'],
-            'DO' => ['01'],
-            'AG' => ['01'],
-            'AK' => ['01'],
-            'AD' => ['02'],
-        ];
-
-        $valid = isset($allowedGrappes[$village])
-              && in_array($grappe, $allowedGrappes[$village])
-              && in_array($bras, ['PD', 'G2'])
-              && preg_match('/^(0[1-9]|1[0-9]|20)$/', $tablette)
-              && preg_match('/^\d{3}$/', $menage)
-              && (int)$menage >= 1;
-
-        return compact('valid', 'village', 'grappe', 'bras', 'tablette', 'menage');
-    }
-
-    private static function inferBrasKey(string $id): string
-    {
-        $p = self::parseHouseholdId($id);
-        if ($p['bras'] === 'G2') return '2';
-        if ($p['bras'] === 'PD') return '1';
-        return '';
-    }
-
-    private static function resolveBrasKey(array $hh): string
-    {
-        $cluster = ($hh['cluster_djigbe']  ?? '')
-                ?: ($hh['cluster_gbonou']  ?? '')
-                ?: ($hh['cluster_miniffi'] ?? '');
-        if (isset(self::BRAS_FROM_CLUSTER[$cluster])) return self::BRAS_FROM_CLUSTER[$cluster];
-        return self::inferBrasKey($hh['household_id'] ?? '');
-    }
-
-    private static function extractCluster(array $hh): string
-    {
-        $fromFields = ($hh['cluster_id'] ?? '')
-            ?: ($hh['cluster_djigbe'] ?? '')
-            ?: ($hh['cluster_gbonou'] ?? '')
-            ?: ($hh['cluster_miniffi'] ?? '');
-        if ($fromFields !== '') return $fromFields;
-
-        $p = self::parseHouseholdId($hh['household_id'] ?? '');
-        return self::CLUSTER_FROM_ID[$p['village']][$p['grappe']] ?? '';
-    }
+    /** Données propres à chaque onglet (Cohorte A : préchargée par CohortAFollowUpService) */
+    private const TAB_DATA = [
+        'baseline'     => ['members', 'old_nets', 'study_nets'],
+        'rapport'      => ['members', 'old_nets', 'study_nets'],
+        'distribution' => ['members', 'old_nets', 'study_nets'],
+        'ua'           => ['ua_baseline', 'ua_24'],
+        'ae'           => ['adverse_events'],
+    ];
 
     private const EVENTS = [
         'baseline' => ['key' => 'baseline', 'label' => 'Baseline & Distribution', 'icon' => '📋', 'event' => 'baseline_et_distri_arm_1'],
@@ -151,7 +77,8 @@ class DashboardController extends Controller
     {
         set_time_limit(180);
         try {
-            $this->redcap->warmAll();
+            // Uniquement le socle commun : chaque onglet précharge ensuite ses propres données
+            $this->redcap->warm(array_merge(self::CORE_DATA, ['study_nets']));
             return response()->json(['done' => true]);
         } catch (\Exception $e) {
             return response()->json(['done' => false, 'error' => $e->getMessage()], 500);
@@ -161,7 +88,7 @@ class DashboardController extends Controller
     public function section(Request $request, string $tab): \Illuminate\Http\Response
     {
         set_time_limit(300);
-        $this->redcap->warmAll();
+        $this->redcap->warm(array_merge(self::CORE_DATA, self::TAB_DATA[$tab] ?? []));
 
         $visiteRaw   = $this->redcap->getVisiteData();
         $idRaw       = $this->redcap->getIdentificationData();
@@ -182,7 +109,8 @@ class DashboardController extends Controller
             'ua'              => [],
             'ua24'            => [],
             'ae'              => [],
-            'followUp'        => [],
+            'followUpA'       => [],
+            'followUpB'       => [],
             'performanceChart'=> ['labels' => [], 'datasets' => []],
         ];
 
@@ -213,24 +141,30 @@ class DashboardController extends Controller
             case 'followup':
             case 'suivi_a':
             case 'suivi':
-                $followUpEvents = [
-                    'suivi6'  => 'suivi_6_mois_arm_1',
-                    'suivi12' => 'suivi_12_mois_arm_1',
-                    'suivi18' => 'suivi_18_mois_coho_arm_1',
-                    'suivi24' => 'suivi_24_mois_arm_1',
-                    'suivi36' => 'suivi_36_mois_arm_1',
-                ];
-                $followUp = [];
-                foreach ($followUpEvents as $key => $event) {
-                    $raw = $this->redcap->getFollowUpData($event);
-                    $followUp[$key] = $this->buildFollowUpData($raw, $visits);
+                if ($tab !== 'suivi') {
+                    // Cohorte A : Visite, Questionnaire Base, Membres, Avant Suivi, Form 7, 8, 9
+                    $fuA = app(CohortAFollowUpService::class)->loadAll();
+                    // statusById (1 600+ ménages) n'est utile qu'à la page de suivi individuel
+                    $data['followUpA'] = array_map(fn($tp) => array_diff_key($tp, ['statusById' => 1]), $fuA['timepoints']);
                 }
-                $data['followUp'] = $followUp;
+                if ($tab !== 'suivi_a') {
+                    // Cohorte B : Form 10 uniquement (une instance par moustiquaire prélevée)
+                    $fuB = app(\App\Services\CohortBFollowUpService::class)->loadAll();
+                    $data['followUpB'] = array_map(fn($tp) => array_diff_key($tp, ['statusById' => 1]), $fuB['timepoints']);
+                }
                 break;
         }
 
         $html = view('dashboard', $data)->render();
-        return response()->make($html, 200, ['Content-Type' => 'text/html']);
+
+        // Compression gzip (sections de plusieurs Mo, très répétitives) si le serveur ne l'a pas déjà fait
+        $headers = ['Content-Type' => 'text/html; charset=UTF-8', 'Vary' => 'Accept-Encoding'];
+        if (str_contains((string) $request->header('Accept-Encoding'), 'gzip')
+            && !ini_get('zlib.output_compression') && function_exists('gzencode')) {
+            $html = gzencode($html, 6);
+            $headers['Content-Encoding'] = 'gzip';
+        }
+        return response()->make($html, 200, $headers);
     }
 
     public function exportRapportPdf(Request $request): \Illuminate\Http\Response
@@ -357,6 +291,82 @@ class DashboardController extends Controller
         $pdf->setPaper('A4', 'portrait');
 
         return $pdf->download('rapport-activites-' . now()->format('Y-m-d') . '.pdf');
+    }
+
+    /**
+     * GET /baseline/old-nets/csv
+     * Liste des ménages possédant des moustiquaires avant la distribution de l'étude,
+     * au format CSV prêt à importer dans KoboToolbox (média pulldata / select_from_file).
+     */
+    public function exportOldNetsHouseholdsCsv(): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        set_time_limit(300);
+        $this->redcap->warmAll();
+
+        $idRaw     = $this->redcap->getIdentificationData();
+        $qbRaw     = $this->redcap->getBaselineQuestionnaireData();
+        $oldNetRaw = $this->redcap->getOldNetData();
+
+        $qbByHh = collect($qbRaw)
+            ->filter(fn($r) => $r['household_id'] !== '' && ($r['redcap_repeat_instrument'] ?? '') === '')
+            ->keyBy('household_id');
+
+        // Nombre de filets réellement enregistrés dans le Form 3B (une instance par filet)
+        $oldNetsByHh = collect($oldNetRaw)
+            ->filter(fn($r) =>
+                $r['household_id'] !== '' &&
+                ($r['redcap_repeat_instrument'] ?? '') === 'form_3b_anciennes_moustiquaires_du_mnage' &&
+                $r['redcap_repeat_instance'] !== ''
+            )
+            ->groupBy('household_id')->map->count();
+
+        $rows = collect($idRaw)
+            ->filter(fn($r) => $r['household_id'] !== '')
+            ->unique('household_id')
+            ->map(function ($r) use ($qbByHh, $oldNetsByHh) {
+                $id      = $r['household_id'];
+                $qb      = $qbByHh->get($id, []);
+                $consent = ($r['consent_accepted'] ?? '') ?: ($qb['consent_accepted'] ?? '');
+
+                // Form 3B en priorité ; à défaut, le nombre déclaré dans le questionnaire baseline
+                $registered = (int) $oldNetsByHh->get($id, 0);
+                $declared   = ($qb['moustiquaire'] ?? '') === '1' ? (int) ($qb['nb_moustiquaires'] ?? 0) : 0;
+                $nbOld      = $registered > 0 ? $registered : $declared;
+
+                $parsed     = self::parseHouseholdId($id);
+                $villageKey = ($r['village'] ?? '') ?: ($parsed['village'] ?? '');
+                $cluster    = self::extractCluster($r);
+                $clusterLbl = self::CLUSTER_LABELS[$cluster] ?? '';
+                $grappe     = $clusterLbl !== ''
+                    ? trim(explode('/', $clusterLbl)[1] ?? $clusterLbl)
+                    : ($parsed['grappe'] !== '' ? 'Grappe ' . (int) $parsed['grappe'] : '');
+
+                return [
+                    'consented'                  => $consent === '1',
+                    'village'                    => self::VILLAGE_LABELS[$villageKey] ?? $villageKey,
+                    'grappe'                     => $grappe,
+                    'household_id'               => $id,
+                    'bras'                       => self::BRAS_LABELS[self::resolveBrasKey($r)] ?? '',
+                    'cohorte'                    => self::COHORT_LABELS[$r['study_cohort'] ?? ''] ?? '',
+                    'nb_anciennes_moustiquaires' => $nbOld,
+                ];
+            })
+            ->filter(fn($r) => $r['consented'] && $r['nb_anciennes_moustiquaires'] > 0)
+            ->sortBy(fn($r) => [$r['village'], $r['grappe'], $r['household_id']])
+            ->values();
+
+        $columns  = ['village', 'grappe', 'household_id', 'bras', 'cohorte', 'nb_anciennes_moustiquaires'];
+        $filename = 'menages_anciennes_moustiquaires_' . now()->format('Y-m-d') . '.csv';
+
+        return response()->streamDownload(function () use ($rows, $columns) {
+            // Pas de BOM : KoboToolbox/Enketo lirait le BOM dans le nom de la 1re colonne
+            $out = fopen('php://output', 'w');
+            fputcsv($out, $columns);
+            foreach ($rows as $r) {
+                fputcsv($out, array_map(fn($c) => $r[$c], $columns));
+            }
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
     public function clearCache(): RedirectResponse
@@ -663,6 +673,154 @@ class DashboardController extends Controller
             : 'Toutes-tablettes_';
 
         return $pdf->download($prefix . 'resume-distribution_' . now()->format('Y-m-d') . '.pdf');
+    }
+
+    // ── Flow diagram page (SVG / PNG / JPG) ──────────────────────────────────
+    public function downloadFlowDiagram(): \Illuminate\View\View
+    {
+        $this->redcap->warmAll();
+
+        $idData = collect($this->redcap->getIdentificationData())
+            ->filter(fn($r) => ($r['household_id'] ?? '') !== '' && ($r['consent_accepted'] ?? '') === '1')
+            ->unique('household_id')
+            ->values();
+
+        $idMap  = $idData->keyBy('household_id');
+        $form4a = collect($this->redcap->getForm4aData())
+            ->filter(fn($r) => ($r['household_id'] ?? '') !== '' && ($r['redcap_repeat_instrument'] ?? '') === '');
+
+        $pdNets = $form4a
+            ->filter(fn($r) => ($idMap->get($r['household_id'], [])['bras'] ?? '') === '1')
+            ->sum(fn($r) => (int) ($r['nb_moustiquaires_etude'] ?? 0));
+        $g2Nets = $form4a
+            ->filter(fn($r) => ($idMap->get($r['household_id'], [])['bras'] ?? '') === '2')
+            ->sum(fn($r) => (int) ($r['nb_moustiquaires_etude'] ?? 0));
+
+        $aePD = \App\Models\AeSelectedHousehold::where('arm', 'PD')->count();
+        $aeG2 = \App\Models\AeSelectedHousehold::where('arm', 'G2')->count();
+
+        $fmt = fn(int $n): string => number_format($n, 0, ',', ' ');
+
+        $svg = $this->buildFlowDiagramSvg([
+            'totalHH'  => $fmt($idData->count()),
+            'pdHH'     => $fmt($idData->where('bras', '1')->count()),
+            'g2HH'     => $fmt($idData->where('bras', '2')->count()),
+            'totalNets'=> $fmt($pdNets + $g2Nets),
+            'pdNets'   => $fmt($pdNets),
+            'g2Nets'   => $fmt($g2Nets),
+            'cohA'     => $fmt($idData->where('study_cohort', '1')->count()),
+            'cohA_PD'  => $fmt($idData->where('study_cohort', '1')->where('bras', '1')->count()),
+            'cohA_G2'  => $fmt($idData->where('study_cohort', '1')->where('bras', '2')->count()),
+            'cohB'     => $fmt($idData->where('study_cohort', '2')->count()),
+            'cohB_PD'  => $fmt($idData->where('study_cohort', '2')->where('bras', '1')->count()),
+            'cohB_G2'  => $fmt($idData->where('study_cohort', '2')->where('bras', '2')->count()),
+            'aePD'     => $fmt($aePD),
+            'aeG2'     => $fmt($aeG2),
+            'date'     => now()->format('d/m/Y'),
+        ]);
+
+        return view('flow-diagram', compact('svg'));
+    }
+
+    private function buildFlowDiagramSvg(array $d): string
+    {
+        extract($d);
+        return <<<SVG
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="flow-svg" xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680">
+  <rect width="1200" height="680" fill="white"/>
+  <!-- L1: ITN Distribution -->
+  <rect x="20" y="15" width="1160" height="85" rx="6" fill="#DAEEF3" stroke="#17375E" stroke-width="2.5"/>
+  <text x="600" y="42" text-anchor="middle" font-family="Arial,sans-serif" font-size="19" font-weight="bold" fill="#17375E">ITN Distribution</text>
+  <text x="600" y="62" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#17375E">PermaNet&#174; Dual (PD) and Interceptor&#174; G2</text>
+  <text x="600" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#17375E">PD: {$pdHH} HH ({$pdNets} ITNs)&#160;&#160;&#183;&#160;&#160;G2: {$g2HH} HH ({$g2Nets} ITNs)&#160;&#160;&#183;&#160;&#160;Total: {$totalHH} HH &#8212; {$totalNets} ITNs distributed</text>
+  <!-- connector L1→L2 -->
+  <line x1="600" y1="100" x2="600" y2="135" stroke="#8EAABD" stroke-width="1.8" stroke-dasharray="5,3"/>
+  <!-- L2: Adverse Events selection -->
+  <rect x="350" y="135" width="500" height="72" rx="6" fill="#EBF1DE" stroke="#4F7A28" stroke-width="2"/>
+  <text x="600" y="161" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#375623">Adverse Events Selection</text>
+  <text x="600" y="182" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#375623">PD: {$aePD} HH&#160;&#160;&#183;&#160;&#160;G2: {$aeG2} HH</text>
+  <text x="600" y="199" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-style="italic" fill="#375623">Follow-up at 1 week &#8211; 1 month</text>
+  <!-- connectors L2→L3 fork (vertical exits between Fabric integrity and Lab bioassays) -->
+  <line x1="497" y1="207" x2="497" y2="232" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="250" y1="232" x2="843" y2="232" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="250" y1="232" x2="250" y2="255" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="843" y1="232" x2="843" y2="255" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <!-- L3: Cohorts -->
+  <rect x="75" y="255" width="350" height="58" rx="5" fill="#FFFF99" stroke="#BF8F00" stroke-width="2"/>
+  <text x="250" y="279" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#7F5200">Cohort A &#8212; {$cohA} HH</text>
+  <text x="250" y="300" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#8A5900">PD: {$cohA_PD}&#160;&#160;&#183;&#160;&#160;G2: {$cohA_G2}</text>
+  <rect x="492" y="255" width="702" height="58" rx="5" fill="#FFFF99" stroke="#BF8F00" stroke-width="2"/>
+  <text x="843" y="279" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#7F5200">Cohort B &#8212; {$cohB} HH</text>
+  <text x="843" y="300" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#8A5900">PD: {$cohB_PD}&#160;&#160;&#183;&#160;&#160;G2: {$cohB_G2}</text>
+  <!-- connectors L3→L4 Cohort A -->
+  <line x1="250" y1="313" x2="250" y2="340" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="110" y1="340" x2="395" y2="340" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="110" y1="340" x2="110" y2="358" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="395" y1="340" x2="395" y2="358" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <!-- connectors L3→L4 Cohort B (3 branches: Bioessais, Semi-terrain, Chimie/Physique) -->
+  <line x1="843" y1="313" x2="843" y2="340" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="600" y1="340" x2="1090" y2="340" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="600" y1="340" x2="600" y2="358" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="805" y1="340" x2="805" y2="358" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="1090" y1="340" x2="1090" y2="358" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <!-- L4: Activity boxes -->
+  <rect x="15" y="358" width="191" height="95" rx="5" fill="#EBF1DE" stroke="#4F7A28" stroke-width="1.8"/>
+  <text x="110" y="381" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" font-weight="bold" fill="#375623">Attrition</text>
+  <text x="110" y="399" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#375623">{$cohA_PD} HH (PD)</text>
+  <text x="110" y="416" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#375623">{$cohA_G2} HH (G2)</text>
+  <text x="110" y="437" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-style="italic" fill="#375623">6, 12, 24, 36 months</text>
+  <rect x="298" y="358" width="194" height="95" rx="5" fill="#EBF1DE" stroke="#4F7A28" stroke-width="1.8"/>
+  <text x="395" y="381" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#375623">Fabric integrity</text>
+  <text x="395" y="399" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#375623">N &#8805; 750 ITNs / arm</text>
+  <text x="395" y="418" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-style="italic" fill="#375623">6, 12, 24, 36 months</text>
+  <rect x="502" y="358" width="196" height="95" rx="5" fill="#EBF1DE" stroke="#4F7A28" stroke-width="1.8"/>
+  <text x="600" y="381" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#375623">Laboratory bioassays</text>
+  <text x="600" y="399" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#375623">30 ITNs / arm</text>
+  <text x="600" y="418" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-style="italic" fill="#375623">0, 12, 24, 36 months</text>
+  <rect x="706" y="358" width="198" height="95" rx="5" fill="#EBF1DE" stroke="#4F7A28" stroke-width="1.8"/>
+  <text x="805" y="381" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#375623">Semi-field RR hut trial</text>
+  <text x="805" y="399" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#375623">33 ITNs / arm withdrawn</text>
+  <text x="805" y="418" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-style="italic" fill="#375623">0, 12, 24, 36 months</text>
+  <rect x="993" y="358" width="192" height="95" rx="5" fill="#EBF1DE" stroke="#4F7A28" stroke-width="1.8"/>
+  <text x="1090" y="378" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#375623">Chemical analysis</text>
+  <text x="1090" y="394" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-style="italic" fill="#375623">0, 6, 12, 18, 24, 36 months</text>
+  <text x="1090" y="414" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#375623">Physical charact.</text>
+  <text x="1090" y="430" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-style="italic" fill="#375623">0, 12, 24, 36 months</text>
+  <!-- connectors L4→L5 -->
+  <line x1="110"  y1="453" x2="110"  y2="472" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="395"  y1="453" x2="395"  y2="472" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="600"  y1="453" x2="600"  y2="472" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="805"  y1="453" x2="805"  y2="472" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="1090" y1="453" x2="1090" y2="472" stroke="#8EAABD" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <!-- L5: Outcome boxes -->
+  <rect x="15" y="472" width="191" height="165" rx="5" fill="#FFCCDD" stroke="#C0444F" stroke-width="1.5"/>
+  <text x="110" y="494" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#5E1933">Physical presence / absence</text>
+  <text x="110" y="513" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">&#8226; Reasons for absence</text>
+  <text x="110" y="530" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">&#8226; Functional survival</text>
+  <text x="110" y="547" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">&#8226; Median survival</text>
+  <rect x="298" y="472" width="194" height="165" rx="5" fill="#FFCCDD" stroke="#C0444F" stroke-width="1.5"/>
+  <text x="395" y="494" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#5E1933">Proportional Hole Index (pHI)</text>
+  <text x="395" y="513" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">&#8226; Good (pHI 0&#8211;64)</text>
+  <text x="395" y="530" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">&#8226; Acceptable (65&#8211;642)</text>
+  <text x="395" y="547" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">&#8226; Torn (pHI &#8805; 643)</text>
+  <rect x="502" y="472" width="196" height="165" rx="5" fill="#FFCCDD" stroke="#C0444F" stroke-width="1.5"/>
+  <text x="600" y="494" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#5E1933">Cone bioassays (S) + Tunnel (R)</text>
+  <text x="600" y="513" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">KD, mortality, blood-feeding</text>
+  <text x="600" y="530" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">inhibition &#8212; 0, 12, 24,</text>
+  <text x="600" y="547" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">36 months</text>
+  <rect x="706" y="472" width="198" height="165" rx="5" fill="#FFCCDD" stroke="#C0444F" stroke-width="1.5"/>
+  <text x="805" y="494" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#5E1933">Mortality + Blood-feeding</text>
+  <text x="805" y="513" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">inhibition &#8212; An. gambiae</text>
+  <text x="805" y="530" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-style="italic" fill="#5E1933">pyrethroid resistant, Cove</text>
+  <rect x="993" y="472" width="192" height="165" rx="5" fill="#FFCCDD" stroke="#C0444F" stroke-width="1.5"/>
+  <text x="1090" y="494" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">AI content, surface AI,</text>
+  <text x="1090" y="511" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">WRI, bursting strength,</text>
+  <text x="1090" y="528" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#5E1933">resistance to hole formation</text>
+  <!-- Footer -->
+  <text x="600" y="666" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#9AAAB8">REDCap &#183; ENDURE-Net Project #46 &#183; AIRID-Africa &#183; Generated on {$date}</text>
+</svg>
+SVG;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1052,7 +1210,7 @@ class DashboardController extends Controller
         // ── Rows (fix cohort/village/cluster from household ID when visits data missing) ──
         $rows = $uniq->map(function ($r) use ($visits, $idMap) {
             $hhId       = $r['household_id'];
-            $hh         = $visits->firstWhere('household_id', $hhId) ?? [];
+            $hh         = $this->visitOf($visits, $hhId) ?? [];
             $idData     = $idMap?->get($hhId, []) ?? [];
             $parsed     = self::parseHouseholdId($hhId);
             $brasKey    = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, (array)$hh, ['household_id' => $hhId]));
@@ -1428,7 +1586,7 @@ class DashboardController extends Controller
         $form5aByHh = $form5a->keyBy('household_id');
 
         $rows = $form5b->unique('household_id')->map(function ($r) use ($visits, $form5aByHh) {
-            $hh         = $visits->firstWhere('household_id', $r['household_id']) ?? [];
+            $hh         = $this->visitOf($visits, $r['household_id']) ?? [];
             $a5         = $form5aByHh->get($r['household_id'], []);
             $brasKey    = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, $hh));
             $villageKey = ($hh['village'] ?? '') ?: (self::parseHouseholdId($r['household_id'])['village'] ?? '');
@@ -1529,10 +1687,11 @@ class DashboardController extends Controller
                     if ($c > 0) $ageCounts[$ageLabel] = $c;
                 }
                 $symDetails[$field] = [
-                    'label'     => $label,
-                    'count'     => $count,
-                    'pct'       => $pctNet($count),
-                    'ageCounts' => $ageCounts,
+                    'label'        => $label,
+                    'count'        => $count,
+                    'pct'          => $pctNet($count),
+                    'ageCounts'    => $ageCounts,
+                    'householdIds' => $sympRecs->pluck('household_id')->unique()->sort()->values()->toArray(),
                 ];
             }
 
@@ -1639,82 +1798,6 @@ class DashboardController extends Controller
         return compact('total', 'anySymptom', 'continueUse', 'bedbugs', 'bbOnNet',
                        'symptomCounts', 'rows', 'byArm', 'aeTabletActivity', 'allAeDates', 'aeTabletDatasets',
                        'symptomsByArm', 'absentByArm');
-    }
-
-    private function buildFollowUpData(array $raw, Collection $visits): array
-    {
-        $records = collect($raw)->filter(fn($r) =>
-            ($r['redcap_repeat_instrument'] === 'form_7_suivi_des_moustiquaires_de_ltude' ||
-             $r['redcap_repeat_instrument'] === 'form_10_suivi_cohorte_b')
-            && $r['redcap_repeat_instance'] !== ''
-        );
-
-        $total     = $records->unique('household_id')->count();
-        $totalNets = $records->count();
-
-        $form7 = $records->where('redcap_repeat_instrument', 'form_7_suivi_des_moustiquaires_de_ltude');
-        $netsPresent7   = $form7->where('net_present', '1')->count();
-        $netsUsed7      = $form7->where('net_used_last_night', '1')->count();
-        $netsHoles7     = $form7->where('itn_has_holes', '1')->count();
-        $netsUsed7days7 = $form7->where('itn_utilisation_7j', '1')->count();
-
-        $form10 = $records->where('redcap_repeat_instrument', 'form_10_suivi_cohorte_b');
-        $netsPresent10   = $form10->where('itn_study_verified', '1')->count();
-        $netsUsed10      = $form10->where('itn_used_last_night', '1')->count();
-        $netsUsed7days10 = $form10->where('itn_use_lastweek', '1')->count();
-
-        $rows = $records->map(function ($r) use ($visits) {
-            $hh         = $visits->firstWhere('household_id', $r['household_id']) ?? [];
-            $isF7       = $r['redcap_repeat_instrument'] === 'form_7_suivi_des_moustiquaires_de_ltude';
-            $netId      = $isF7
-                ? ($r['fw_study_net_id_scan'] ?: $r['fw_study_net_id_saisie'] ?? '—')
-                : ($r['itn_unique_id_scan'] ?: $r['itn_unique_id_saisi'] ?? '—');
-            $brasKey    = ($hh['bras'] ?? '') ?: self::resolveBrasKey(array_merge($r, $hh));
-            $villageKey = ($hh['village'] ?? '') ?: (self::parseHouseholdId($r['household_id'])['village'] ?? '');
-
-            return [
-                'id'         => $r['household_id'],
-                'bras'       => self::BRAS_LABELS[$brasKey] ?? '—',
-                'cohort'     => self::COHORT_LABELS[$hh['study_cohort'] ?? ''] ?? '—',
-                'village'    => self::VILLAGE_LABELS[$villageKey] ?? '—',
-                'cluster'    => self::CLUSTER_LABELS[self::extractCluster($hh)] ?? '—',
-                'form'       => $isF7 ? 'Form 7 (Coh. A)' : 'Form 10 (Coh. B)',
-                'net_id'     => $netId,
-                'date'       => $isF7 ? ($r['afw_date'] ?? '—') : ($r['fw_cb_date_visit'] ?? '—'),
-                'present'    => $isF7 ? ($r['net_present'] === '1') : ($r['itn_study_verified'] === '1'),
-                'used_night' => $isF7 ? ($r['net_used_last_night'] === '1') : ($r['itn_used_last_night'] === '1'),
-                'has_holes'  => $isF7 ? ($r['itn_has_holes'] === '1') : null,
-                'used_7days' => $isF7 ? ($r['itn_utilisation_7j'] === '1') : ($r['itn_use_lastweek'] === '1'),
-            ];
-        })->values();
-
-        $hhBrasMap = $visits->pluck('bras', 'household_id');
-        $byBras = collect(['1' => 'PERMANET DUAL', '2' => 'INTERCEPTOR G2'])
-            ->map(function ($brasLabel, $brasKey) use ($form7, $form10, $hhBrasMap) {
-                $resolveBras = fn($r) => $hhBrasMap->get($r['household_id'], '') ?: self::inferBrasKey($r['household_id']);
-                $f7  = $form7->filter(fn($r)  => $resolveBras($r) === $brasKey);
-                $f10 = $form10->filter(fn($r) => $resolveBras($r) === $brasKey);
-                return [
-                    'label'         => $brasLabel,
-                    'brasKey'       => $brasKey,
-                    'form7Count'    => $f7->count(),
-                    'netsPresent7'  => $f7->where('net_present', '1')->count(),
-                    'netsUsed7'     => $f7->where('net_used_last_night', '1')->count(),
-                    'netsHoles7'    => $f7->where('itn_has_holes', '1')->count(),
-                    'netsUsed7d7'   => $f7->where('itn_utilisation_7j', '1')->count(),
-                    'form10Count'   => $f10->count(),
-                    'netsPresent10' => $f10->where('itn_study_verified', '1')->count(),
-                    'netsUsed10'    => $f10->where('itn_used_last_night', '1')->count(),
-                    'netsUsed7d10'  => $f10->where('itn_use_lastweek', '1')->count(),
-                ];
-            })->values();
-
-        return compact(
-            'total', 'totalNets',
-            'netsPresent7', 'netsUsed7', 'netsHoles7', 'netsUsed7days7',
-            'netsPresent10', 'netsUsed10', 'netsUsed7days10',
-            'rows', 'byBras'
-        ) + ['form7Count' => $form7->count(), 'form10Count' => $form10->count()];
     }
 
     private function groupStats(Collection $visits, string $field, array $labels): Collection
