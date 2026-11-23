@@ -316,9 +316,10 @@
                     <tr><td><code>Q-AE-03</code></td><td>Info</td><td>Symptôme signalé sans lien avec les MILDA</td></tr>
                     <tr><td><code>Q-UA-01</code></td><td>Avertissement</td><td>Contradiction dans les données d'acceptabilité</td></tr>
                     <tr><td><code>Q-UA-02</code></td><td>Info</td><td>Réponse d'utilisation incohérente</td></tr>
-                    <tr><td><code>Q-FW-01</code></td><td>Avertissement</td><td>Moustiquaire absente lors du suivi</td></tr>
-                    <tr><td><code>Q-FW-02</code></td><td>Avertissement</td><td>Contradiction présence / utilisation au suivi</td></tr>
-                    <tr><td><code>Q-FW-03</code></td><td>Info</td><td>Nombre de nuits d'utilisation suspect</td></tr>
+                    {{-- Suivis Cohorte A (Q-FUA) et Cohorte B (Q-FUB) — catalogue défini dans FollowUpQueryChecks --}}
+                    @foreach (\App\Http\Controllers\QueriesController::FU_QUERY_CODES as $code => [$sev, $title])
+                        <tr><td><code>{{ $code }}</code></td><td>{{ ['critical' => 'Critique', 'warning' => 'Avertissement', 'info' => 'Info'][$sev] }}</td><td>{{ $title }}</td></tr>
+                    @endforeach
                 </tbody>
             </table>
 

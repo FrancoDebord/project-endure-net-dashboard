@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\FollowUpQueryChecks;
 use App\Models\AeSelectedHousehold;
 use App\Services\RedCapService;
 use Illuminate\Http\Request;
@@ -10,6 +11,7 @@ use Illuminate\View\View;
 
 class QueriesController extends Controller
 {
+    use FollowUpQueryChecks;
 
     /** Recherche O(1) d'un ménage dans $visits (index construit une fois par collection) */
     private array $visitIndex = [];
@@ -76,7 +78,10 @@ class QueriesController extends Controller
         'form_5a_informations_gnriques_adverse_events'           => 'Adverse Events — Informations génériques (Form 5A)',
         'form_5_adverse_avents'                                  => 'Adverse Events — Par moustiquaire (Form 5B)',
         'form_6_user_acceptability'                              => 'Acceptabilité utilisateur (Form 6)',
+        'formulaire_avant_suivi'                                 => 'Formulaire Avant Suivi (Cohorte A)',
         'form_7_suivi_des_moustiquaires_de_ltude'                => 'Suivi des moustiquaires de l\'étude (Form 7)',
+        'form_8_vrification_autres_moustiquaires'                => 'Vérification autres moustiquaires (Form 8)',
+        'form_9_autres_moustiquaires_du_mnage'                   => 'Autres moustiquaires du ménage (Form 9)',
         'form_10_suivi_cohorte_b'                                => 'Suivi Cohorte B (Form 10)',
     ];
 
@@ -233,12 +238,14 @@ class QueriesController extends Controller
         $aeRaw       = $this->redcap->getAdverseEventsData();
         $uaRaw       = $this->redcap->getUserAcceptabilityData('user_acceptability_arm_1');
 
-        $followUpRaw = [];
+        // Suivis : exports séparés par cohorte (ne pas fusionner : les lignes non répétées se chevaucheraient)
+        $followUpA = [];
+        foreach (\App\Services\RedCapService::COHORT_A_EVENTS as $event) {
+            $followUpA[$event] = $this->redcap->getCohortAFollowUpData($event);
+        }
+        $followUpB = [];
         foreach (\App\Services\RedCapService::COHORT_B_EVENTS as $event) {
-            $rawA = in_array($event, \App\Services\RedCapService::COHORT_A_EVENTS, true)
-                ? $this->redcap->getCohortAFollowUpData($event)
-                : [];
-            $followUpRaw[$event] = array_merge($rawA, $this->redcap->getCohortBFollowUpData($event));
+            $followUpB[$event] = $this->redcap->getCohortBFollowUpData($event);
         }
 
         $visits = $this->buildVisits($visiteRaw, $idRaw, $qbRaw);
@@ -275,9 +282,12 @@ class QueriesController extends Controller
             ->merge($this->checkAEMissingDate($aeRaw, $visits))
             ->merge($this->checkAEQuitWithoutSymptom($aeRaw, $visits));
 
-        foreach ($followUpRaw as $event => $raw) {
-            $queries = $queries->merge($this->checkFollowUpContradictions($raw, $visits, $event));
+        $baseNets    = self::fuBaselineNets($studyNetRaw);
+        $baseMembers = self::fuBaselineMembers($memberRaw);
+        foreach ($followUpA as $event => $raw) {
+            $queries = $queries->merge($this->checkCohortAFollowUp($raw, $visits, $event, $baseNets, $baseMembers));
         }
+        $queries = $queries->merge($this->checkCohortBFollowUp($followUpB, $visits, $baseNets));
 
         return $queries->sortBy('code')->values()
             ->map(fn($q, $i) => array_merge($q, ['_idx' => $i]));
@@ -1556,99 +1566,6 @@ class QueriesController extends Controller
                     'value'        => 'itn_continue_use=0, ae_any_symptom=0 ou vide',
                 ]
             );
-        }
-        return $results;
-    }
-
-    // ── Follow-up ─────────────────────────────────────────────────────────────
-
-    private function checkFollowUpContradictions(array $raw, Collection $visits, string $event): array
-    {
-        $results = [];
-        $records = collect($raw)->filter(fn($r) =>
-            ($r['redcap_repeat_instrument'] === 'form_7_suivi_des_moustiquaires_de_ltude' ||
-             $r['redcap_repeat_instrument'] === 'form_10_suivi_cohorte_b')
-            && $r['redcap_repeat_instance'] !== ''
-        );
-
-        foreach ($records as $r) {
-            $id   = $r['household_id'];
-            $hh   = $this->visitOf($visits, $id);
-            $isF7 = $r['redcap_repeat_instrument'] === 'form_7_suivi_des_moustiquaires_de_ltude';
-            $form = $isF7 ? 'form_7_suivi_des_moustiquaires_de_ltude' : 'form_10_suivi_cohorte_b';
-            $inst = $r['redcap_repeat_instance'];
-
-            if ($isF7) {
-                $present   = $r['net_present']        ?? '';
-                $usedNight = $r['net_used_last_night'] ?? '';
-                $hasHoles  = $r['itn_has_holes']       ?? '';
-                $netId     = ($r['fu_itn_id_saisie'] ?? '') ?: ('N°' . ($r['fu_num_hh_itn'] ?? '—'));
-                $date      = $r['afw_date']      ?? '—';
-                $initials  = $r['a_fw_initials'] ?? '';
-
-                if ($present === '0' && $usedNight === '1') {
-                    $results[] = $this->q('Q-FW-01', 'critical',
-                        'Utilisation déclarée — filet absent',
-                        "Ménage {$id} (Form 7) : le filet est signalé absent lors de la visite (net_present = Non) mais l'utilisateur déclare l'avoir utilisé la nuit précédente (net_used_last_night = Oui). Un filet absent ne peut pas être utilisé.",
-                        "Corriger net_present en Oui si le filet était effectivement présent, ou corriger net_used_last_night en Non si le filet était absent.",
-                        [
-                            'event'        => $event,
-                            'form'         => $form,
-                            'instance'     => $inst,
-                            'household_id' => $id,
-                            'initials'     => $initials,
-                            'tablet'       => $hh['a_tablette_id'] ?? '',
-                            'field'        => 'net_present / net_used_last_night',
-                            'value'        => 'net_present=0, net_used_last_night=1',
-                            'extra'        => "ID filet : {$netId} | Date : {$date}",
-                        ]
-                    );
-                }
-
-                if ($present === '0' && $hasHoles === '1') {
-                    $results[] = $this->q('Q-FW-02', 'warning',
-                        'Trous signalés — filet absent',
-                        "Ménage {$id} (Form 7) : des trous sont signalés sur le filet (itn_has_holes = Oui) alors que le filet est déclaré absent (net_present = Non). Il est impossible d'inspecter l'intégrité d'un filet absent.",
-                        "Vérifier si le filet était présent lors de la visite. Corriger net_present à Oui, ou corriger itn_has_holes à Non si le filet n'était pas là.",
-                        [
-                            'event'        => $event,
-                            'form'         => $form,
-                            'instance'     => $inst,
-                            'household_id' => $id,
-                            'initials'     => $initials,
-                            'tablet'       => $hh['a_tablette_id'] ?? '',
-                            'field'        => 'net_present / itn_has_holes',
-                            'value'        => 'net_present=0, itn_has_holes=1',
-                            'extra'        => "ID filet : {$netId} | Date : {$date}",
-                        ]
-                    );
-                }
-            } else {
-                $verified  = $r['itn_study_verified']  ?? '';
-                $usedNight = $r['itn_used_last_night']  ?? '';
-                $netId     = $r['itn_unique_id_scan'] ?: ($r['itn_unique_id_saisi'] ?? '—');
-                $date      = $r['fw_cb_date_visit'] ?? '—';
-                $initials  = $r['fw_cb_initials']  ?? '';
-
-                if ($verified === '0' && $usedNight === '1') {
-                    $results[] = $this->q('Q-FW-03', 'critical',
-                        'Utilisation déclarée — filet non retrouvé (Form 10)',
-                        "Ménage {$id} (Form 10) : le filet n'a pas été retrouvé ni vérifié lors de la visite (itn_study_verified = Non) mais l'utilisateur déclare l'avoir utilisé la nuit précédente (itn_used_last_night = Oui). Contradiction logique.",
-                        "Corriger itn_study_verified à Oui si le filet était présent, ou corriger itn_used_last_night à Non si le filet n'a pas été retrouvé.",
-                        [
-                            'event'        => $event,
-                            'form'         => $form,
-                            'instance'     => $inst,
-                            'household_id' => $id,
-                            'initials'     => $initials,
-                            'tablet'       => $hh['a_tablette_id'] ?? '',
-                            'field'        => 'itn_study_verified / itn_used_last_night',
-                            'value'        => 'itn_study_verified=0, itn_used_last_night=1',
-                            'extra'        => "ID filet : {$netId} | Date : {$date}",
-                        ]
-                    );
-                }
-            }
         }
         return $results;
     }
