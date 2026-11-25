@@ -50,11 +50,13 @@ return [
     | KOBO_API_URL   : URL de base de l'API (sans slash final)
     | KOBO_API_TOKEN : Token d'authentification Bearer
     | KOBO_FORM_UID  : UID du formulaire d'inspection dans KoboToolbox
+    | KOBO_ACCUM_FORM_UID : UID du formulaire « Accumulation, stockage et utilisation des MII » (suivi 6 mois)
     */
     'kobotoolbox' => [
         'api_url'  => env('KOBO_API_URL',  'https://kf.kobotoolbox.org/api/v2'),
-        'token'    => env('KOBO_API_TOKEN', '3d39e278353fd48882349990b81f9f24f90dfa84'),
+        'token'    => env('KOBO_API_TOKEN'),
         'form_uid' => env('KOBO_FORM_UID',  'aqK3SBNgxZcpoqKnMf2AAF'),
+        'accum_form_uid' => env('KOBO_ACCUM_FORM_UID', 'ajbs4vtCUdXKfycPTLNgWb'),
     ],
 
 ];

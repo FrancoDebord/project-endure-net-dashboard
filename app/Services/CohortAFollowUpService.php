@@ -52,6 +52,53 @@ class CohortAFollowUpService
         '1' => 'Chaque nuit (7)', '2' => 'La plupart (5-6)', '3' => 'Quelques nuits (1-4)',
         '4' => 'Non utilisée la semaine', '5' => 'Jamais utilisée', '98' => 'Ne sait pas',
     ];
+    // ── Form 7 : listes de choix détaillées ──
+    private const NET_MATERIAL_USES = [
+        '1' => 'Fenêtre / porte / avant-toit', '2' => 'Protection des plantes / cultures', '3' => 'Pêche',
+        '4' => 'Séchage du poisson', '5' => 'Literie / rembourrage', '6' => 'Latrines / clôture',
+        '7' => 'Réparation d\'autres moustiquaires', '8' => 'Découpée : corde / attache / divers',
+        '96' => 'Autre', '98' => 'Ne sait pas',
+    ];
+    private const NET_NOT_HANGING = [
+        '1' => 'Trop difficile à suspendre', '2' => 'Trop courte', '3' => 'Pas d\'espace',
+        '4' => 'Personne pour la suspendre', '5' => 'Sera suspendue plus tard', '6' => 'Suspendue uniquement la nuit',
+        '7' => 'Gardée jusqu\'à usure des autres', '96' => 'Autre', '98' => 'Ne sait pas',
+    ];
+    private const NET_SLEEPING_PLACES = [
+        '1' => 'Lit avec cadre (complet)', '2' => 'Lit à structure simple', '3' => 'Matelas en mousse',
+        '4' => 'Natte en paille', '5' => 'Sur herbe', '6' => 'À même le sol', '7' => 'Jamais utilisée',
+    ];
+    private const NET_NOT_USED_REASONS = [
+        '1' => 'Pas de moustiques', '2' => 'Pas de paludisme', '3' => 'Trop chaud', '4' => 'N\'aime pas l\'odeur',
+        '5' => 'Sensation d\'enfermement', '6' => 'Trop vieille / déchirée', '7' => 'Trop sale',
+        '8' => 'Non disponible (lavage…)', '9' => 'Utilisateur absent la nuit dernière', '10' => 'Pas nécessaire',
+        '96' => 'Autre', '98' => 'Ne sait pas',
+    ];
+    private const WASH_PRODUCTS = [
+        '1' => 'Savon en barre', '2' => 'Détergent (OMO…)', '3' => 'Eau de javel', '4' => 'Mélange de produits', '5' => 'Eau seule',
+    ];
+    private const WASH_DRY_LOCATIONS = [
+        '1' => 'Dehors, sur le sol', '2' => 'Dehors, sur un fil', '3' => 'Dehors, buisson / clôture',
+        '4' => 'Intérieur, sur un fil', '5' => 'Intérieur, meuble / sol',
+    ];
+    private const WASH_DRY_EXPOSURE = ['1' => 'À l\'ombre', '2' => 'Au soleil'];
+    private const HOLE_CAUSES = [
+        '1' => 'Déchirée par un objet', '2' => 'Tirée et déchirée', '3' => 'Brûlée par une flamme',
+        '4' => 'Rats ou souris', '5' => 'Couture ouverte', '6' => 'Autre manière', '7' => 'Ne se souvient pas',
+    ];
+    private const MODIFICATION_TYPES = [
+        '1' => 'Forme modifiée', '2' => 'Ajout pour allonger', '3' => 'Ajout pour renforcer', '4' => 'Autre',
+    ];
+    /** Réponses ouvertes du Form 7 : champ => question */
+    private const F7_OPEN_FIELDS = [
+        'net_absence_reason_other'   => 'Q7.1 Sort de la moustiquaire (autre)',
+        'net_material_use_other'     => 'Q8.1 Usage du matériau (autre)',
+        'net_not_kept_reason'        => 'Q8.2 Pourquoi pas gardée',
+        'net_not_hanging_reason_oth' => 'Q10.1 Non suspendue (autre)',
+        'no_use_lst_nght_roth'       => 'Q13.1 Non utilisée (autre)',
+        'itn_modification_other'     => 'Q30.1 Modification (autre)',
+    ];
+
     private const OTHER_NET_BRANDS = [
         '1' => 'PermaNet 2.0', '2' => 'Dawa Plus', '3' => 'Olyset', '4' => 'Duranet', '5' => 'Interceptor',
         '6' => 'Netprotect', '7' => 'MagNet', '8' => 'Royal Sentry', '9' => 'Yorkool', '10' => 'SafeNet',
@@ -72,7 +119,7 @@ class CohortAFollowUpService
      * Charge tous les suivis Cohorte A.
      * @return array{households: Collection, timepoints: array, dags: array}
      */
-    public const COMPUTED_CACHE_KEY = 'cohortA.followup.computed';
+    public const COMPUTED_CACHE_KEY = 'cohortA.followup.computed.v2';
 
     public function loadAll(): array
     {
@@ -140,10 +187,39 @@ class CohortAFollowUpService
         return $out;
     }
 
+    /** Répartition d'un champ checkbox (export flat champ___code) : libellé => nombre de fiches */
+    private static function countChecked(Collection $rows, string $field, array $labels): array
+    {
+        $out = [];
+        foreach ($labels as $code => $label) {
+            $n = $rows->where("{$field}___{$code}", '1')->count();
+            if ($n > 0) $out[$label] = $n;
+        }
+        arsort($out);
+        return $out;
+    }
+
+    private static function median(Collection $values): ?float
+    {
+        $s = $values->sort()->values();
+        if ($s->isEmpty()) return null;
+        $m = intdiv($s->count(), 2);
+        return $s->count() % 2 ? (float) $s[$m] : ($s[$m - 1] + $s[$m]) / 2;
+    }
+
     /** Indicateurs moustiquaires de l'étude (Form 7) */
     private function cohortANetStats(Collection $f7): array
     {
         $present = $f7->where('net_present', '1');
+        $absent  = $f7->where('net_present', '0');
+        $otherUse  = $absent->whereIn('net_absence_reason', ['7', '10']);
+        $notHung   = $present->whereIn('net_location', ['3', '4', '5']);
+        $notUsed   = $present->where('net_used_last_night', '0');
+        $washedRows= $present->where('itn_ever_washed', '1');
+        $holeRows  = $present->where('itn_has_holes', '1')->where('net_location', '!=', '6');
+        $washCounts= $washedRows->pluck('itn_wash_count_6m')->filter(fn($v) => is_numeric($v))->map(fn($v) => (int) $v);
+        $durations = $present->pluck('net_duration_months')->filter(fn($v) => is_numeric($v) && (int) $v !== 98)->map(fn($v) => (int) $v);
+        $sleepers  = $present->where('net_used_last_night', '1')->pluck('fu_num_pers_net')->filter(fn($v) => is_numeric($v) && (int) $v > 0)->map(fn($v) => (int) $v);
         $phis    = $f7->map(fn($r) => self::phi($r))->filter(fn($v) => $v !== null)->values();
         $sorted  = $phis->sort()->values();
         $median  = $sorted->isEmpty() ? null
@@ -168,6 +244,25 @@ class CohortAFollowUpService
             'absenceReasons'=> self::countBy($f7->where('net_present', '0'), 'net_absence_reason', self::NET_ABSENCE_REASONS),
             'locations'     => self::countBy($present, 'net_location', self::NET_LOCATIONS),
             'use7'          => self::countBy($present, 'itn_utilisation_7j', self::NET_USE_7N),
+            // ── Détail Form 7 ──
+            'otherUse'      => $otherUse->count(),
+            'materialUses'  => self::countChecked($otherUse, 'net_material_use', self::NET_MATERIAL_USES),
+            'notHung'       => $notHung->count(),
+            'notHangingReasons' => self::countBy($notHung, 'net_not_hanging_reason', self::NET_NOT_HANGING),
+            'sleepingPlaces'=> self::countBy($present, 'net_sleeping_place_type', self::NET_SLEEPING_PLACES),
+            'notUsed'       => $notUsed->count(),
+            'notUsedReasons'=> self::countBy($notUsed, 'no_used_last_night_rson', self::NET_NOT_USED_REASONS),
+            'sleepersMean'  => $sleepers->isEmpty() ? null : round($sleepers->avg(), 1),
+            'durationMedian'=> self::median($durations),
+            'washCountMedian' => self::median($washCounts),
+            'washCountMean' => $washCounts->isEmpty() ? null : round($washCounts->avg(), 1),
+            'washProducts'  => self::countBy($washedRows, 'itn_lastwash_product', self::WASH_PRODUCTS),
+            'washDryLocations' => self::countBy($washedRows, 'itn_lastwash_dry_location', self::WASH_DRY_LOCATIONS),
+            'washDryExposure'  => self::countBy($washedRows, 'itn_lastwash_dry_exposure', self::WASH_DRY_EXPOSURE),
+            'holeAssessed'  => $holeRows->count(),
+            'holeCauses'    => self::countChecked($holeRows, 'itn_hole_cause', self::HOLE_CAUSES),
+            'modified'      => $holeRows->where('itn_modified', '1')->count(),
+            'modificationTypes' => self::countBy($holeRows->where('itn_modified', '1'), 'itn_modification_type', self::MODIFICATION_TYPES),
         ];
     }
 
@@ -350,6 +445,27 @@ class CohortAFollowUpService
             ];
         })->sortBy(fn($r) => [$r['hh'], (int) $r['num']])->values()->all();
 
+        // Réponses ouvertes du Form 7
+        $openAnswers = [];
+        foreach ($f7A as $r) {
+            foreach (self::F7_OPEN_FIELDS as $field => $question) {
+                $txt = trim((string) ($r[$field] ?? ''));
+                if ($txt === '') continue;
+                $hh = $cohortA->get($r['household_id'], []);
+                $openAnswers[] = [
+                    'question' => $question,
+                    'text'     => $txt,
+                    'hh'       => $r['household_id'],
+                    'bras'     => $hh['bras'] ?? '—',
+                    'code'     => ($r['fu_itn_id_saisie'] ?? '') ?: ('n° ' . ($r['fu_num_hh_itn'] ?? '?')),
+                    'date'     => $r['afw_date'] ?? '',
+                    'agent'    => strtoupper($r['a_fw_initials'] ?? ''),
+                ];
+            }
+        }
+        $order7 = array_flip(array_values(self::F7_OPEN_FIELDS));
+        usort($openAnswers, fn($a, $b) => [$order7[$a['question']], $a['hh']] <=> [$order7[$b['question']], $b['hh']]);
+
         // Statut compact de chaque ménage (page de suivi individuel)
         $statusById = $hhRows->mapWithKeys(fn($h) => [$h['id'] => [
             'status'        => $h['status'],
@@ -394,6 +510,7 @@ class CohortAFollowUpService
             'byCluster'  => $byCluster,
             'statusById' => $statusById,
             'netRows'    => $netRows,
+            'openAnswers'=> $openAnswers,
             'alerts'     => $alerts,
             'outside'    => $outside->all(),
         ];

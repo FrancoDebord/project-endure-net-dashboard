@@ -53,6 +53,14 @@ trait FollowUpQueryChecks
         'Q-FUA-33' => ['warning',  'Form 7 : trous déclarés mais aucun trou compté'],
         'Q-FUA-34' => ['warning',  'Form 7 : plus de trous réparés que de trous comptés'],
         'Q-FUA-35' => ['warning',  'Form 7 : plus de fiches que de moustiquaires distribuées'],
+        'Q-FUA-36' => ['warning',  'Form 7 : ancienneté (Q6) incohérente avec la date de distribution'],
+        'Q-FUA-37' => ['warning',  'Form 7 : réponse « Autre » sans précision'],
+        'Q-FUA-38' => ['warning',  'Form 7 : utilisée à d\'autres usages sans préciser l\'usage (Q8)'],
+        'Q-FUA-39' => ['warning',  'Form 7 : emplacement (Q9) et raison de non-suspension (Q10) incohérents'],
+        'Q-FUA-60' => ['warning',  'Form 7 : couchage « Jamais utilisée » (Q11) mais utilisation déclarée'],
+        'Q-FUA-61' => ['warning',  'Form 7 : « non disponible la nuit dernière » (Q13) mais trouvée suspendue'],
+        'Q-FUA-62' => ['warning',  'Form 7 : nombre de lavages (Q17) nul ou invraisemblable'],
+        'Q-FUA-63' => ['warning',  'Form 7 : identifiant du dormeur différent du numéro sélectionné'],
         // ── Cohorte A — Form 9 ──
         'Q-FUA-40' => ['warning',  'Form 9 : observation de la moustiquaire non renseignée'],
         'Q-FUA-41' => ['critical', 'Form 9 : utilisée la nuit dernière mais non utilisée la semaine'],
@@ -107,6 +115,17 @@ trait FollowUpQueryChecks
             if (($r[$f] ?? '') !== '') return true;
         }
         return false;
+    }
+
+    /** Codes cochés d'un champ checkbox REDCap (export flat : champ___code = '1') */
+    private static function fuChecked(array $r, string $field): array
+    {
+        $out = [];
+        $prefix = $field . '___';
+        foreach ($r as $k => $v) {
+            if ($v === '1' && str_starts_with((string) $k, $prefix)) $out[] = substr($k, strlen($prefix));
+        }
+        return $out;
     }
 
     /** Moustiquaires de l'étude distribuées à la baseline : [household_id => [instance => code normalisé]] */
@@ -457,7 +476,31 @@ trait FollowUpQueryChecks
                     $c('net_present', 'vide'));
                 continue;
             }
+            // « Autre » coché sans précision (Q7.1, Q8.1, Q10.1, Q13.1, Q30.1)
+            $otherMissing = function (string $qLabel, string $txtField, string $codeLabel) use (&$results, $id, $label, $c) {
+                $results[] = $this->q('Q-FUA-37', 'warning', self::FU_QUERY_CODES['Q-FUA-37'][1],
+                    "Ménage {$id}, Form 7 ({$label}) : {$qLabel} = « {$codeLabel} » mais la précision ({$txtField}) n'est pas saisie.",
+                    "Saisir la précision demandée, ou choisir la modalité correspondante si elle existe.",
+                    $c($txtField, 'vide'));
+            };
+            $blank = fn(string $f) => trim((string) ($r[$f] ?? '')) === '';
+
             if ($present === '0') {
+                $reason = (string) ($r['net_absence_reason'] ?? '');
+                if ($reason === '99' && $blank('net_absence_reason_other')) {
+                    $otherMissing('Q7 (sort de la moustiquaire)', 'net_absence_reason_other', 'Autre');
+                }
+                if (in_array($reason, ['7', '10'], true)) {
+                    $uses = self::fuChecked($r, 'net_material_use');
+                    if (empty($uses)) {
+                        $results[] = $this->q('Q-FUA-38', 'warning', self::FU_QUERY_CODES['Q-FUA-38'][1],
+                            "Ménage {$id}, Form 7 ({$label}) : la moustiquaire est déclarée utilisée à d'autres usages (Q7 = {$reason}) mais l'usage du matériau (Q8) n'est pas coché.",
+                            "Cocher le ou les usages du matériau (Q8).",
+                            $c('net_material_use', "Q7 = {$reason}, Q8 vide"));
+                    } elseif (in_array('96', $uses, true) && $blank('net_material_use_other')) {
+                        $otherMissing('Q8 (usage du matériau)', 'net_material_use_other', 'Autre');
+                    }
+                }
                 if (self::fuFilled($r, ['net_location', 'net_used_last_night', 'itn_utilisation_7j', 'itn_has_holes', 'itn_ever_washed'])) {
                     $results[] = $this->q('Q-FUA-26', 'warning', self::FU_QUERY_CODES['Q-FUA-26'][1],
                         "Ménage {$id}, Form 7 ({$label}) : la moustiquaire est déclarée absente (net_present = Non) mais des réponses sur son emplacement, son utilisation ou son état sont enregistrées (valeurs restées après changement de réponse).",
@@ -504,6 +547,20 @@ trait FollowUpQueryChecks
                             "Corriger les numéros des personnes ayant dormi sous la moustiquaire.",
                             $c('fu_hh_pers1_num … fu_hh_pers5_num', implode(', ', $persons)));
                     }
+                    // Identifiant saisi (bed_net_persN) ≠ numéro sélectionné (fu_hh_persN_num)
+                    $idMismatch = [];
+                    for ($i = 1; $i <= min($nPers, 5); $i++) {
+                        $sel = (string) ($r["fu_hh_pers{$i}_num"] ?? '');
+                        $ent = trim((string) ($r["bed_net_pers{$i}"] ?? ''));
+                        if ($sel === '' || $ent === '' || !preg_match('/(\d+)\s*$/', $ent, $mm)) continue;
+                        if ((int) $mm[1] !== (int) $sel) $idMismatch[] = "personne {$i} : n° {$sel} sélectionné, {$ent} saisi";
+                    }
+                    if ($idMismatch) {
+                        $results[] = $this->q('Q-FUA-63', 'warning', self::FU_QUERY_CODES['Q-FUA-63'][1],
+                            "Ménage {$id}, Form 7 ({$label}) : l'identifiant recopié du dormeur ne correspond pas au numéro sélectionné (" . implode(' ; ', $idMismatch) . ").",
+                            "Recopier l'identifiant affiché ([ménage]-[n° personne]) ou corriger le numéro sélectionné.",
+                            $c('fu_hh_persN_num / bed_net_persN', implode(' ; ', $idMismatch)));
+                    }
                     $tooHigh = $maxMember > 0 ? array_filter($persons, fn($p) => (int) $p > $maxMember) : [];
                     if ($tooHigh) {
                         $results[] = $this->q('Q-FUA-32', 'warning', self::FU_QUERY_CODES['Q-FUA-32'][1],
@@ -513,6 +570,75 @@ trait FollowUpQueryChecks
                     }
                 }
             }
+            $loc = (string) ($r['net_location'] ?? '');
+
+            // Q6 : ancienneté déclarée vs temps écoulé depuis la distribution (baseline)
+            $dur = trim((string) ($r['net_duration_months'] ?? ''));
+            if ($dur !== '' && $dur !== '98' && is_numeric($dur) && $baseDate !== '' && ($r['afw_date'] ?? '') !== '') {
+                try {
+                    $elapsed = (int) round(\Carbon\Carbon::parse($baseDate)->floatDiffInMonths(\Carbon\Carbon::parse($r['afw_date'])));
+                    if (abs((int) $dur - $elapsed) > 2) {
+                        $results[] = $this->q('Q-FUA-36', 'warning', self::FU_QUERY_CODES['Q-FUA-36'][1],
+                            "Ménage {$id}, Form 7 ({$label}) : ancienneté déclarée de {$dur} mois (Q6) alors que la moustiquaire a été distribuée il y a environ {$elapsed} mois (baseline du {$baseDate}, suivi du {$r['afw_date']}).",
+                            "Vérifier Q6 (98 si le répondant ne sait pas) ; une moustiquaire de l'étude a l'âge de la distribution.",
+                            $c('net_duration_months', "{$dur} mois (attendu ≈ {$elapsed})"));
+                    }
+                } catch (\Throwable) {}
+            }
+
+            // Q9 / Q10 : raison de non-suspension
+            $nh = (string) ($r['net_not_hanging_reason'] ?? '');
+            if (in_array($loc, ['3', '4', '5'], true) && $nh === '') {
+                $results[] = $this->q('Q-FUA-39', 'warning', self::FU_QUERY_CODES['Q-FUA-39'][1],
+                    "Ménage {$id}, Form 7 ({$label}) : la moustiquaire n'est pas suspendue (Q9 = {$loc}) mais la raison (Q10) n'est pas renseignée.",
+                    "Renseigner la raison pour laquelle la moustiquaire n'est pas suspendue.",
+                    $c('net_location / net_not_hanging_reason', "{$loc} / vide"));
+            } elseif (in_array($loc, ['1', '2'], true) && $nh !== '') {
+                $results[] = $this->q('Q-FUA-39', 'warning', self::FU_QUERY_CODES['Q-FUA-39'][1],
+                    "Ménage {$id}, Form 7 ({$label}) : la moustiquaire est suspendue (Q9 = {$loc}) mais une raison de non-suspension est enregistrée (Q10 = {$nh}, valeur restée après changement de réponse).",
+                    "Vérifier l'emplacement observé ; effacer Q10 si la moustiquaire est bien suspendue.",
+                    $c('net_location / net_not_hanging_reason', "{$loc} / {$nh}"));
+            }
+            if ($nh === '96' && $blank('net_not_hanging_reason_oth')) {
+                $otherMissing('Q10 (raison de non-suspension)', 'net_not_hanging_reason_oth', 'Autre');
+            }
+
+            // Q11 : couchage « Jamais utilisée » vs utilisation déclarée
+            if (($r['net_sleeping_place_type'] ?? '') === '7' && ($used === '1' || in_array($use7, ['1', '2', '3'], true))) {
+                $results[] = $this->q('Q-FUA-60', 'warning', self::FU_QUERY_CODES['Q-FUA-60'][1],
+                    "Ménage {$id}, Form 7 ({$label}) : le type de couchage est « Jamais utilisée » (Q11 = 7) alors que la moustiquaire est déclarée utilisée (Q12 = {$used}, Q15 = {$use7}).",
+                    "Corriger le type de couchage ou les réponses sur l'utilisation.",
+                    $c('net_sleeping_place_type / net_used_last_night / itn_utilisation_7j', "7 / {$used} / {$use7}"));
+            }
+
+            // Q13 : raison de non-utilisation
+            $nr = (string) ($r['no_used_last_night_rson'] ?? '');
+            if ($used === '0' && $nr === '96' && $blank('no_use_lst_nght_roth')) {
+                $otherMissing('Q13 (raison de non-utilisation)', 'no_use_lst_nght_roth', 'Autre');
+            }
+            if ($used === '0' && $nr === '8' && in_array($loc, ['1', '2'], true)) {
+                $results[] = $this->q('Q-FUA-61', 'warning', self::FU_QUERY_CODES['Q-FUA-61'][1],
+                    "Ménage {$id}, Form 7 ({$label}) : personne n'a dormi dessous car elle n'était « pas disponible la nuit dernière (lavage…) » (Q13 = 8), mais elle a été trouvée suspendue au-dessus du couchage (Q9 = {$loc}).",
+                    "Vérifier avec l'agent : moustiquaire réinstallée depuis, ou raison / emplacement à corriger.",
+                    $c('no_used_last_night_rson / net_location', "8 / {$loc}"));
+            }
+
+            // Q17 : nombre de lavages
+            $wc = trim((string) ($r['itn_wash_count_6m'] ?? ''));
+            if (($r['itn_ever_washed'] ?? '') === '1' && $wc !== '' && is_numeric($wc) && ((int) $wc === 0 || (int) $wc > 12)) {
+                $results[] = $this->q('Q-FUA-62', 'warning', self::FU_QUERY_CODES['Q-FUA-62'][1],
+                    "Ménage {$id}, Form 7 ({$label}) : " . ((int) $wc === 0
+                        ? "la moustiquaire est déclarée déjà lavée (Q16 = Oui) mais 0 lavage au cours des 6 derniers mois (Q17)."
+                        : "{$wc} lavages déclarés au cours des 6 derniers mois (Q17), soit plus de 2 par mois."),
+                    (int) $wc === 0 ? "Vérifier Q17 : 0 est possible si le dernier lavage date de plus de 6 mois, sinon corriger." : "Vérifier le nombre de lavages avec le répondant.",
+                    $c('itn_ever_washed / itn_wash_count_6m', "1 / {$wc}"));
+            }
+
+            // Q30.1 : modification « Autre »
+            if (($r['itn_modification_type'] ?? '') === '4' && $blank('itn_modification_other')) {
+                $otherMissing('Q30 (type de modification)', 'itn_modification_other', 'Autre');
+            }
+
             if (($r['itn_has_holes'] ?? '') === '1' && ($r['net_location'] ?? '') !== '6') {
                 $total = (int) ($r['itn_hole_size1'] ?? 0) + (int) ($r['itn_hole_size2'] ?? 0)
                        + (int) ($r['itn_hole_size3'] ?? 0) + (int) ($r['itn_hole_size4'] ?? 0);

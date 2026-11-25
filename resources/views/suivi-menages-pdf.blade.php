@@ -86,6 +86,7 @@ table.list tr.alt td { background:#F8FAFC; }
                 <th style="width:48px">Bras</th>
                 <th style="width:110px">Chef de ménage · Tél.</th>
                 <th style="width:110px">Point de contact · Tél.</th>
+                <th style="width:150px">Membres du ménage (baseline) : nom (sexe, âge)</th>
                 <th>{{ $cfg['netsHeader'] }}</th>
                 <th style="width:50px">Statut actuel</th>
                 <th style="width:52px">Date visite</th>
@@ -104,6 +105,7 @@ table.list tr.alt td { background:#F8FAFC; }
                 <td class="{{ $r['brasKey'] === '1' ? 'pd' : 'g2' }}">{{ $r['brasKey'] === '1' ? 'PD' : ($r['brasKey'] === '2' ? 'G2' : '—') }}</td>
                 <td>{{ $r['chef'] ?: '—' }}<br><span class="small">{{ $r['chefPhone'] }}</span></td>
                 <td>{{ $r['contact'] ?: '—' }}<br><span class="small">{{ $r['contactPhone'] }}</span></td>
+                <td class="small">@include('partials.hh-members', ['list' => $members[$r['id']] ?? []])</td>
                 <td class="small">
                     <b>{{ count($r['netCodes']) }}</b> —
                     @foreach ($r['netCodes'] as $num => $code){{ $num }} : <span class="mono">{{ $code !== '' ? $code : '(sans code)' }}</span>@if (!$loop->last) · @endif @endforeach

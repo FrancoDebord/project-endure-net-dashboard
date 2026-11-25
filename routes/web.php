@@ -1,8 +1,10 @@
 <?php
 
 use App\Http\Controllers\AcceptabiliteController;
+use App\Http\Controllers\AccumulationMiiController;
 use App\Http\Controllers\AdverseEventsSelectionController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CohortBSelectionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GpsExportController;
 use App\Http\Controllers\InspectionController;
@@ -48,6 +50,23 @@ Route::middleware('auth')->group(function () {
     Route::get('/suivi-a/menages/pdf', [SuiviCohorteController::class, 'pdf'])->defaults('cohort', 'a')->name('suivi-a.menages.pdf');
     Route::get('/suivi-b/menages',     [SuiviCohorteController::class, 'index'])->defaults('cohort', 'b')->name('suivi-b.menages');
     Route::get('/suivi-b/menages/pdf', [SuiviCohorteController::class, 'pdf'])->defaults('cohort', 'b')->name('suivi-b.menages.pdf');
+
+    // Cohorte B — sélection aléatoire des ménages pour le prélèvement des moustiquaires
+    Route::get('/cohorte-b/selection',                    [CohortBSelectionController::class, 'index'])->name('cb.selection.index');
+    Route::get('/cohorte-b/selection/print',              [CohortBSelectionController::class, 'print'])->name('cb.selection.print');
+    Route::post('/cohorte-b/selection/draw',              [CohortBSelectionController::class, 'draw'])->name('cb.selection.draw');
+    Route::post('/cohorte-b/selection/complete',          [CohortBSelectionController::class, 'complete'])->name('cb.selection.complete');
+    Route::post('/cohorte-b/selection/release',           [CohortBSelectionController::class, 'release'])->name('cb.selection.release');
+    Route::post('/cohorte-b/selection/lock',              [CohortBSelectionController::class, 'lock'])->name('cb.selection.lock');
+    Route::post('/cohorte-b/selection/reset',             [CohortBSelectionController::class, 'reset'])->name('cb.selection.reset');
+    Route::get('/cohorte-b/selection/draws/{draw}/csv',     [CohortBSelectionController::class, 'exportDraw'])->whereNumber('draw')->name('cb.selection.draw-csv');
+    Route::post('/cohorte-b/selection/{row}/release',     [CohortBSelectionController::class, 'releaseOne'])->whereNumber('row')->name('cb.selection.release-one');
+
+    // Suivi 6 mois — formulaire Kobo « Accumulation, stockage et utilisation des MII »
+    Route::get('/accumulation-mii',                          [AccumulationMiiController::class, 'index'])->name('accumulation.index');
+    Route::get('/accumulation-mii/pdf',                      [AccumulationMiiController::class, 'pdf'])->name('accumulation.pdf');
+    Route::get('/accumulation-mii/photo/{submission}/{field}', [AccumulationMiiController::class, 'photo'])
+        ->whereNumber('submission')->name('accumulation.photo');
 
     // Rapport par bras
     Route::get('/rapport/bras',     [RapportBrasController::class, 'index'])->name('rapport.bras');

@@ -142,6 +142,51 @@
         </div>
     </section>
 
+    {{-- ── Listes par tablette ─────────────────────────────────────── --}}
+    <section class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+            <p class="section-title">Listes des ménages par village et tablette — Suivi {{ $suivis[$filters['suivi']] }}</p>
+            <p class="text-xs text-gray-500 mt-1 pl-4">N° de tablette = avant-dernière composante de l'identifiant du ménage (ex. AG-01-PD-<b>01</b>-001) ; il se répète d'un village à l'autre.
+                Choisir un village dans les filtres ci-dessous pour réduire la liste.
+                @if ($cfg['letter'] === 'A') La liste inclut aussi les ménages Cohorte B sélectionnés de la même tablette. @endif</p>
+        </div>
+        <div class="overflow-x-auto" style="max-height:420px">
+            <table class="tbl">
+                <thead>
+                    <tr>
+                        <th class="text-left">Village</th>
+                        <th class="text-left">Tablette</th>
+                        <th class="text-left">Grappe(s)</th>
+                        <th class="text-left">DAG</th>
+                        <th>Ménages</th>
+                        <th>Visités</th>
+                        <th>Restants</th>
+                        <th class="text-right">Listes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($byTablet as $t)
+                    <tr>
+                        @php $vt = ['suivi' => $filters['suivi'], 'village' => $t['village'], 'tablet' => $t['tablet']]; @endphp
+                        <td class="font-semibold">{{ $t['village'] }}</td>
+                        <td class="font-mono font-bold"><a class="hover:underline" href="{{ $q(['village' => $t['village'], 'tablet' => $t['tablet']]) }}">{{ $t['tablet'] ?: '—' }}</a></td>
+                        <td class="text-[11px]">{{ $t['clusters'] }}</td>
+                        <td class="text-[11px]">{{ $t['dags'] }}</td>
+                        <td class="text-center">{{ $t['expected'] }}</td>
+                        <td class="text-center">{{ $t['visited'] }}</td>
+                        <td class="text-center font-semibold">{{ $t['expected'] - $t['done'] }}</td>
+                        <td class="text-right whitespace-nowrap">
+                            <a href="{{ route($cfg['route'] . '.pdf', $vt) }}" class="btn btn-secondary">PDF liste</a>
+                            <a href="{{ route($cfg['route'] . '.pdf', $vt + ['only' => 'remaining']) }}" class="btn btn-secondary">PDF restants</a>
+                            <a href="{{ route($cfg['route'] . '.pdf', $vt + ['format' => 'html']) }}" target="_blank" class="btn btn-secondary" title="Version imprimable dans le navigateur">🖨</a>
+                        </td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     {{-- ── Suivi individuel des ménages ────────────────────────────── --}}
     <section class="card overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 space-y-3">
@@ -158,6 +203,12 @@
                     <option value="">Tous les villages</option>
                     @foreach ($villages as $v)
                         <option value="{{ $v }}" @selected($filters['village'] === $v)>{{ $v }}</option>
+                    @endforeach
+                </select>
+                <select name="tablet" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5">
+                    <option value="">Toutes les tablettes</option>
+                    @foreach ($tablets as $tb)
+                        <option value="{{ $tb }}" @selected($filters['tablet'] === $tb)>Tablette {{ $tb }}</option>
                     @endforeach
                 </select>
                 <select name="status" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5">
@@ -204,6 +255,7 @@
                         <th class="text-left">Bras</th>
                         <th class="text-left">Chef de ménage</th>
                         <th class="text-left">Point de contact</th>
+                        <th class="text-left">Membres (baseline)</th>
                         <th>Moustiq.</th>
                         @foreach ($suivis as $sk => $sl)
                             <th class="{{ $filters['suivi'] === $sk ? 'text-red-700' : '' }}">{{ $sl }}</th>
@@ -223,6 +275,7 @@
                         <td class="whitespace-nowrap {{ $r['brasKey'] === '1' ? 'text-red-700' : 'text-gray-700' }}">{{ $r['bras'] }}</td>
                         <td>{{ $r['chef'] ?: '—' }}<span class="block text-[11px] text-gray-400">{{ $r['chefPhone'] }}</span></td>
                         <td>{{ $r['contact'] ?: '—' }}<span class="block text-[11px] text-gray-400">{{ $r['contactPhone'] }}</span></td>
+                        <td class="text-[11px] leading-snug" style="min-width:210px">@include('partials.hh-members', ['list' => $members[$r['id']] ?? []])</td>
                         <td class="text-center">
                             {{ $cur['netsAssessed'] ? $cur['netsPresent'] . ' / ' : '' }}{{ count($r['netCodes']) }}
                         </td>
@@ -240,7 +293,7 @@
                         </td>
                     </tr>
                     @empty
-                    <tr><td colspan="15" class="text-center text-gray-400 py-8">Aucun ménage ne correspond aux filtres.</td></tr>
+                    <tr><td colspan="16" class="text-center text-gray-400 py-8">Aucun ménage ne correspond aux filtres.</td></tr>
                     @endforelse
                 </tbody>
             </table>

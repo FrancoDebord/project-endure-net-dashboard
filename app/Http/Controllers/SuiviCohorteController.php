@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Services\CohortAFollowUpService;
+use App\Services\AccumulationMiiService;
 use App\Services\CohortBFollowUpService;
+use App\Services\CohortBNetSelectionService;
+use App\Services\CohortHouseholds;
 use App\Services\RedCapService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -40,6 +43,7 @@ class SuiviCohorteController extends Controller
             default => [
                 'letter'       => 'A',
                 'route'        => 'suivi-a.menages',
+                'pdfView'      => 'suivi-a-menages-pdf',
                 'service'      => CohortAFollowUpService::class,
                 'computedKey'  => CohortAFollowUpService::COMPUTED_CACHE_KEY,
                 'cachePrefix'  => 'fu_a',
@@ -78,6 +82,7 @@ class SuiviCohorteController extends Controller
             'suivi'   => $suivi,
             'dag'     => (string) $request->query('dag', ''),
             'village' => (string) $request->query('village', ''),
+            'tablet'  => (string) $request->query('tablet', ''),
             'status'  => (string) $request->query('status', ''),
             'search'  => trim((string) $request->query('search', '')),
         ];
@@ -86,6 +91,7 @@ class SuiviCohorteController extends Controller
         $rows = $all
             ->when($filters['dag'] !== '',     fn($c) => $c->where('dag', $filters['dag']))
             ->when($filters['village'] !== '', fn($c) => $c->where('village', $filters['village']))
+            ->when($filters['tablet'] !== '',  fn($c) => $c->where('tablet', $filters['tablet']))
             ->when($filters['status'] !== '',  fn($c) => $c->filter(fn($r) => $r['current']['status'] === $filters['status']))
             ->when($filters['search'] !== '',  fn($c) => $c->filter(fn($r) =>
                 str_contains(mb_strtolower($r['id'] . ' ' . $r['chef'] . ' ' . $r['contact'] . ' ' . $r['chefPhone']), mb_strtolower($filters['search']))))
@@ -102,6 +108,17 @@ class SuiviCohorteController extends Controller
             'inProgress' => $g->filter(fn($r) => $r['current']['status'] === 'en_cours')->count(),
         ])->sortBy('label', SORT_NATURAL)->values();
 
+        // Avancement par village × tablette (les n° de tablette se répètent d'un village à l'autre)
+        $byTablet = $all->groupBy(fn($r) => $r['village'] . '|' . $r['tablet'])->map(fn($g) => [
+            'village'    => $g->first()['village'],
+            'tablet'     => (string) $g->first()['tablet'],
+            'clusters'   => $g->pluck('cluster')->unique()->sort()->implode(', '),
+            'dags'       => $g->pluck('dagLabel')->unique()->sort()->implode(', '),
+            'expected'   => $g->count(),
+            'visited'    => $g->filter(fn($r) => $r['current']['status'] !== 'non_visite')->count(),
+            'done'       => $g->filter(fn($r) => in_array($r['current']['status'], $cfg['doneStatuses'], true))->count(),
+        ])->sortBy(fn($t) => [$t['village'], $t['tablet']])->values();
+
         // Pagination (le rendu de 1 000+ lignes alourdit fortement la page)
         $perPage = 100;
         $pages   = max(1, (int) ceil($rows->count() / $perPage));
@@ -115,6 +132,9 @@ class SuiviCohorteController extends Controller
             'pages'        => $pages,
             'total'        => $all->count(),
             'byDag'        => $byDag,
+            'members'      => CohortHouseholds::baselineMembers(app(RedCapService::class)->getMemberData()),
+            'byTablet'     => $byTablet->when($filters['village'] !== '', fn($c) => $c->where('village', $filters['village']))->values(),
+            'tablets'      => $all->pluck('tablet')->unique()->sort()->values(),
             'statusCounts' => $all->countBy(fn($r) => $r['current']['status'])->all(),
             'dags'         => $data['dags'],
             'villages'     => $all->pluck('village')->unique()->sort()->values(),
@@ -131,11 +151,15 @@ class SuiviCohorteController extends Controller
         $cfg   = $this->cfg($request);
         $data  = app($cfg['service'])->loadAll();
         $suivi = $this->validSuivi($cfg, $request->query('suivi'));
-        $dag   = (string) $request->query('dag', '');
-        $only  = $request->query('only') === 'remaining' ? 'remaining' : 'all';
+        $dag    = (string) $request->query('dag', '');
+        $tablet  = (string) $request->query('tablet', '');
+        $village = (string) $request->query('village', '');
+        $only    = $request->query('only') === 'remaining' ? 'remaining' : 'all';
 
         $rows = $this->rows($data, $suivi)
             ->when($dag !== '', fn($c) => $c->where('dag', $dag))
+            ->when($tablet !== '', fn($c) => $c->where('tablet', $tablet))
+            ->when($village !== '', fn($c) => $c->where('village', $village))
             ->when($only === 'remaining', fn($c) => $c->filter(fn($r) => !in_array($r['current']['status'], $cfg['doneStatuses'], true)));
 
         // Une section (page) par DAG
@@ -153,14 +177,31 @@ class SuiviCohorteController extends Controller
             'suiviLabel'   => $suiviLabel,
             'only'         => $only,
             'statusLabels' => $cfg['statusLabels'],
+            'tablet'       => $tablet,
+            'village'      => $village,
+            // Membres du ménage enregistrés à la baseline (nom, sexe, âge)
+            'members'      => CohortHouseholds::baselineMembers(app(RedCapService::class)->getMemberData()),
         ];
+        $pdfView = $cfg['pdfView'] ?? 'suivi-menages-pdf';
+
+        // Cohorte A : une section par village / grappe, avec en bas les ménages Cohorte B sélectionnés
+        // (même suivi, même grappe) et le croisement avec le formulaire Kobo « Accumulation MII ».
+        if ($cfg['letter'] === 'A') {
+            $allRows = $this->rows($data, $suivi);
+            $viewData['sections'] = $this->clusterSections($allRows, $rows, $dag, $village, $tablet, $suivi, $only);
+            // Le formulaire Kobo « Accumulation MII » est administré au suivi 6 mois uniquement
+            $viewData['showKobo'] = $suivi === 'suivi6';
+            [$viewData['kobo'], $viewData['koboError']] = $viewData['showKobo'] ? $this->koboStatus() : [[], null];
+            $viewData['koboLabels'] = AccumulationMiiService::STATUS_LABELS;
+            $viewData['dagLabel']   = $dag !== '' ? ($allRows->firstWhere('dag', $dag)['dagLabel'] ?? $dag) : 'Tous les DAG';
+        }
 
         // Version imprimable dans le navigateur (instantanée, conseillée pour tous les DAG)
         if ($request->query('format') === 'html') {
-            return response()->view('suivi-menages-pdf', $viewData + ['printMode' => true]);
+            return response()->view($pdfView, $viewData + ['printMode' => true]);
         }
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('suivi-menages-pdf', $viewData);
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($pdfView, $viewData);
         $pdf->setPaper('A4', 'landscape');
         $pdf->setOption([
             'isHtml5ParserEnabled' => true,
@@ -181,11 +222,75 @@ class SuiviCohorteController extends Controller
         $canvas->page_text($canvas->get_width() - 90, $canvas->get_height() - 24,
             'Page {PAGE_NUM} / {PAGE_COUNT}', $font, 7, $grey);
 
-        $dagSlug = $dag !== '' ? '_' . ($groups->first()['label'] ?? $dag) : '_tous-DAG';
+        $dagSlug = ($dag !== '' ? '_' . ($groups->first()['label'] ?? $dag) : ($tablet !== '' ? '' : '_tous-DAG'))
+                 . ($village !== '' ? '_' . str_replace(' ', '-', $village) : '')
+                 . ($tablet !== '' ? "_tablette-{$tablet}" : '');
         $name = "suivi-cohorte-{$cfg['letter']}_" . str_replace(' ', '', $suiviLabel) . $dagSlug
               . ($only === 'remaining' ? '_restants' : '') . '_' . now()->format('Y-m-d') . '.pdf';
 
         return $pdf->download($name);
+    }
+
+    /**
+     * Sections village / grappe pour la liste Cohorte A. Les grappes retenues sont celles des ménages
+     * Cohorte A du DAG demandé (tous statuts), afin de garder une grappe dont il ne reste que des
+     * ménages Cohorte B à visiter. Avec une tablette, seuls les ménages A et B de cette tablette sont listés.
+     */
+    private function clusterSections(Collection $allA, Collection $rowsA, string $dag, string $village, string $tablet, string $suivi, string $only): Collection
+    {
+        $key      = fn($r) => ($r['village'] ?? '') . '|' . ($r['cluster'] ?? '');
+        $clusters = $allA->when($dag !== '', fn($c) => $c->where('dag', $dag))
+                         ->when($village !== '', fn($c) => $c->where('village', $village))
+                         ->when($tablet !== '', fn($c) => $c->where('tablet', $tablet))->groupBy($key);
+        $rowsByCl = $rowsA->groupBy($key);
+
+        // Ménages Cohorte B sélectionnés (non libérés) au même suivi
+        $bByCl = collect();
+        if (array_key_exists($suivi, CohortBFollowUpService::FU_B_LABELS)) {
+            $bByCl = collect(app(CohortBNetSelectionService::class)->state($suivi))
+                ->flatMap(fn($a) => $a['state']['rows'] ?? [])
+                ->filter(fn($r) => $only === 'remaining' ? $r['state'] === 'pending' : $r['state'] !== 'released')
+                ->filter(fn($r) => $tablet === '' || CohortHouseholds::tablet($r['id']) === $tablet)
+                ->filter(fn($r) => $village === '' || ($r['village'] ?? '') === $village)
+                ->sortBy('rank')
+                ->groupBy($key);
+
+            // Tablette : ajouter les grappes où la tablette n'a que des ménages Cohorte B
+            if ($tablet !== '') {
+                foreach ($bByCl as $k => $b) {
+                    if (!$clusters->has($k)) $clusters->put($k, collect([$b->first() + ['dagLabel' => $b->first()['dagLabel'] ?? '']]));
+                }
+            }
+        }
+
+        return $clusters->map(function ($g, $k) use ($rowsByCl, $bByCl) {
+            $first = $g->first();
+            return [
+                'village' => $first['village'],
+                'cluster' => $first['cluster'],
+                'brasKey' => $first['brasKey'],
+                'bras'    => $first['bras'],
+                'dags'    => $g->pluck('dagLabel')->unique()->sort()->implode(', '),
+                'rowsA'   => $rowsByCl->get($k, collect())->sortBy('id')->values(),
+                'rowsB'   => $bByCl->get($k, collect())->values(),
+            ];
+        })
+        ->filter(fn($s) => $s['rowsA']->isNotEmpty() || $s['rowsB']->isNotEmpty())
+        ->sortBy(fn($s) => [$s['village'], $s['cluster']])
+        ->values();
+    }
+
+    /** Statut Kobo « Accumulation MII » par ménage (ménages de la liste cible menages.csv) */
+    private function koboStatus(): array
+    {
+        try {
+            $kobo = collect(app(AccumulationMiiService::class)->loadAll()['households'] ?? [])
+                ->mapWithKeys(fn($h) => [$h['id'] => $h['status']])->all();
+            return [$kobo, null];
+        } catch (\Throwable $e) {
+            report($e);
+            return [[], 'Formulaire Kobo indisponible : ' . $e->getMessage()];
+        }
     }
 
     private function validSuivi(array $cfg, ?string $s): string
@@ -204,7 +309,7 @@ class SuiviCohorteController extends Controller
             foreach ($data['timepoints'] as $k => $tp) {
                 $byTp[$k] = $tp['statusById'][$id] ?? $empty;
             }
-            return $h + ['timepoints' => $byTp, 'current' => $byTp[$suivi]];
+            return $h + ['tablet' => CohortHouseholds::tablet($id), 'timepoints' => $byTp, 'current' => $byTp[$suivi]];
         })
         ->sortBy(fn($r) => [$r['dagLabel'], $r['village'], $r['cluster'], $r['id']])
         ->values();

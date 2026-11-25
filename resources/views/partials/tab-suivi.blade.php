@@ -14,11 +14,18 @@
                         Analyses : contenu chimique (M6, M12, M18, M24, M36) · caractéristiques physiques, bioessais, semi-terrain (M12, M24, M36).
                     </p>
                 </div>
-                <a href="{{ route('suivi-b.menages') }}"
-                   class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white whitespace-nowrap shrink-0"
-                   style="background:var(--red)">
-                    Suivi des ménages &amp; listes PDF par DAG →
-                </a>
+                <div class="flex flex-wrap gap-2 shrink-0">
+                    <a href="{{ route('cb.selection.index') }}"
+                       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap border-2"
+                       style="border-color:var(--red);color:var(--red)">
+                        🎲 Sélection des ménages (30 moustiq./bras)
+                    </a>
+                    <a href="{{ route('suivi-b.menages') }}"
+                       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white whitespace-nowrap"
+                       style="background:var(--red)">
+                        Suivi des ménages &amp; listes PDF par DAG →
+                    </a>
+                </div>
             </div>
         </section>
 

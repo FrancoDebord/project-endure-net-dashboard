@@ -148,6 +148,87 @@
     </div>
 </section>
 
+{{-- ── Form 7 — résultats détaillés ─────────────────────────────────── --}}
+@php
+    $fmtNum = fn($v, $unit = '') => $v === null ? '—' : rtrim(rtrim(number_format($v, 1, ',', ' '), '0'), ',') . $unit;
+@endphp
+<section class="card overflow-hidden">
+    <div class="px-5 pt-4 pb-3 border-b border-gray-50">
+        <p class="section-title mb-0.5">Form 7 — résultats détaillés</p>
+        <p class="text-xs text-gray-400">Devenir, suspension, utilisation, lavage, trous et modifications des moustiquaires de l'étude · suivi {{ $d['label'] }}</p>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-5 divide-x divide-gray-100 border-b border-gray-50">
+        @foreach ([
+            ['Ancienneté déclarée (médiane)', $fmtNum($n['durationMedian'], ' mois'), 'Q6 · hors « ne sait pas »'],
+            ['Dormeurs par moustiquaire', $fmtNum($n['sleepersMean']), 'Q14 · moyenne, utilisées la nuit dern.'],
+            ['Lavages sur 6 mois', $fmtNum($n['washCountMedian']) . ' / ' . $fmtNum($n['washCountMean']), 'Q17 · médiane / moyenne (lavées)'],
+            ['Moustiquaires lavées', $n['washed'] . ' / ' . $n['present'], $pct($n['washed'], $n['present']) . '% des présentes'],
+            ['Modifiées', $n['modified'] . ' / ' . $n['holeAssessed'], 'Q29 · parmi celles avec trous'],
+        ] as [$lbl, $val, $sub])
+        <div class="px-4 py-3">
+            <p class="text-[11px] text-gray-400 uppercase tracking-wide">{{ $lbl }}</p>
+            <p class="text-xl font-bold text-gray-800 mt-0.5">{{ $val }}</p>
+            <p class="text-[11px] text-gray-400">{{ $sub }}</p>
+        </div>
+        @endforeach
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-px bg-gray-100">
+        @foreach ([
+            ['Usage du matériau (Q8)', $n['otherUse'] . ' moustiquaire(s) utilisée(s) à d\'autres usages · plusieurs réponses possibles', $n['materialUses'], '#DC2626', $n['otherUse']],
+            ['Pourquoi non suspendue (Q10)', $n['notHung'] . ' moustiquaire(s) non suspendue(s) ou rangée(s)', $n['notHangingReasons'], '#0EA5E9', $n['notHung']],
+            ['Type de couchage (Q11)', $n['present'] . ' moustiquaire(s) présente(s)', $n['sleepingPlaces'], '#0EA5E9', $n['present']],
+            ['Pourquoi personne n\'a dormi dessous (Q13)', $n['notUsed'] . ' moustiquaire(s) non utilisée(s) la nuit dernière', $n['notUsedReasons'], '#2563EB', $n['notUsed']],
+            ['Produit du dernier lavage (Q18)', $n['washed'] . ' moustiquaire(s) déjà lavée(s)', $n['washProducts'], '#8B5CF6', $n['washed']],
+            ['Lieu de séchage (Q19)', $n['washed'] . ' moustiquaire(s) déjà lavée(s)', $n['washDryLocations'], '#8B5CF6', $n['washed']],
+            ['Séchage ombre / soleil (Q20)', $n['washed'] . ' moustiquaire(s) déjà lavée(s)', $n['washDryExposure'], '#8B5CF6', $n['washed']],
+            ['Cause des trous (Q22)', $n['holeAssessed'] . ' moustiquaire(s) avec trous · plusieurs réponses possibles', $n['holeCauses'], '#D97706', $n['holeAssessed']],
+            ['Type de modification (Q30)', $n['modified'] . ' moustiquaire(s) modifiée(s)', $n['modificationTypes'], '#D97706', $n['modified']],
+        ] as [$title, $sub, $items, $col, $tot])
+        <div class="bg-white p-5">
+            <p class="text-sm font-semibold text-gray-700">{{ $title }}</p>
+            <p class="text-[11px] text-gray-400 mb-3">{{ $sub }}</p>
+            {!! $barList($items, $col, $tot) !!}
+        </div>
+        @endforeach
+    </div>
+
+    @if (!empty($d['openAnswers']))
+    <details class="border-t border-gray-100">
+        <summary class="px-5 py-3 cursor-pointer text-sm font-semibold text-gray-700">
+            Réponses ouvertes du Form 7 <span class="text-xs font-normal text-gray-400">({{ count($d['openAnswers']) }})</span>
+        </summary>
+        <div class="overflow-x-auto max-h-96 overflow-y-auto">
+            <table class="w-full text-xs">
+                <thead class="sticky top-0 bg-gray-50">
+                    <tr class="text-gray-400 uppercase border-b">
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Question</th>
+                        <th class="py-2 px-3 text-left">Réponse</th>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Ménage</th>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Moustiquaire</th>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Bras</th>
+                        <th class="py-2 px-3 text-left whitespace-nowrap">Date · Agent</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                    @foreach ($d['openAnswers'] as $o)
+                    <tr class="hov-row">
+                        <td class="py-1.5 px-3 text-gray-500 whitespace-nowrap">{{ $o['question'] }}</td>
+                        <td class="py-1.5 px-3 text-gray-800">{{ $o['text'] }}</td>
+                        <td class="py-1.5 px-3 font-mono whitespace-nowrap">{{ $o['hh'] }}</td>
+                        <td class="py-1.5 px-3 font-mono whitespace-nowrap">{{ $o['code'] }}</td>
+                        <td class="py-1.5 px-3 whitespace-nowrap">{{ $o['bras'] }}</td>
+                        <td class="py-1.5 px-3 whitespace-nowrap text-gray-500">{{ $o['date'] ?: '—' }} · {{ $o['agent'] ?: '—' }}</td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </details>
+    @endif
+</section>
+
 {{-- ── Avant suivi / Autres moustiquaires / Membres ─────────────────── --}}
 <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="card p-5">
